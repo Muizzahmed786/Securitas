@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy
+alembic
+pydantic
+pydantic-settings
+asyncpg
+psycopg2-binary
+cryptography
+PyJWT
+argon2-cffi
+python-multipart
+pytest
+httpx
