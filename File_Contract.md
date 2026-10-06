@@ -263,3 +263,31 @@ Changes to route paths, methods, or request/response schemas will break API cont
 ---
 
 *(Note: Additional files will be documented here as they are implemented in the codebase.)*
+
+
+## Stage 1 Authentication Contracts
+
+### `app/config.py`
+- **Purpose**: Manage environment configurations securely.
+- **Responsibilities**: Dynamically load `DATABASE_URL` and `SECRET_KEY`.
+- **Invariants**: Must not contain hardcoded default secrets.
+
+### `app/auth/schemas.py`
+- **Purpose**: Pydantic validation for Auth.
+- **Responsibilities**: Enforce strict password complexity for registration; sanitize user output.
+- **Invariants**: `UserResponse` must never expose `password_hash`. Client cannot assign `role_id` via `UserCreate`.
+
+### `app/auth/security.py`
+- **Purpose**: Cryptographic utilities.
+- **Responsibilities**: Argon2 password hashing; JWT generation/decoding.
+- **Invariants**: JWTs must include `sub`, `jti`, `iat`, `exp`, `type`.
+
+### `app/auth/dependencies.py`
+- **Purpose**: Identity resolution for protected routes.
+- **Responsibilities**: Extract token, decode, query `auth_sessions` by `jti`, verify session validity (`revoked_at IS NULL` AND not expired), return active User.
+- **Invariants**: Must raise 401 on any failure to validate cryptographic signature or server-side DB session. Separated from Authorization (RBAC).
+
+### `app/auth/router.py`
+- **Purpose**: Authentication API endpoints.
+- **Responsibilities**: Registration (assigns default role), Login (creates session, captures IP/User-Agent), Logout (revokes session), `/me` (fetches active user profile).
+- **Invariants**: Login failures return generic "Invalid credentials". Endpoints use strict atomic DB transactions.

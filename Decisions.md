@@ -511,3 +511,37 @@ Requires state management for active blocks, but avoids cascading deletes in the
 ### Current State
 
 Accepted.
+
+---
+
+## ADR-010 — Authentication Architecture (Stage 1)
+
+**Status:** Accepted
+
+**Date:** 2026-10-07
+
+**Area:** Authentication / Identity
+
+### Context
+
+Securitas requires a robust authentication mechanism that is stateless enough to be performant but retains server-side control for revocation and explicit logouts. 
+
+### Decision
+
+Implement a hybrid JWT + `auth_sessions` approach.
+- Authentication relies on JWTs containing explicit claims (`sub`, `jti`, `iat`, `exp`, `type`).
+- A server-side `auth_sessions` table tracks every JWT by its unique `jti`.
+- Secrets (e.g. `DATABASE_URL`, `SECRET_KEY`) are dynamically loaded via environment variables rather than hardcoded.
+- Passwords are hashed exclusively using Argon2.
+- Session revocation happens by setting `revoked_at` in the `auth_sessions` table.
+
+### Why
+
+Pure stateless JWTs cannot be explicitly revoked before expiration, which is unacceptable for a high-security system like Securitas. By indexing active sessions via `jti` in the database, we achieve explicit revocation while minimizing database overhead compared to traditional opaque tokens.
+
+### Consequences
+
+- **Positive:** Immediate session revocation upon logout or perceived threat. No hardcoded secrets.
+- **Negative:** Authentication requires a database lookup to check session status.
+
+---
