@@ -51,7 +51,14 @@ RBAC remains the first authorization boundary. The Risk Engine can further restr
    ```sql
    CREATE DATABASE securitas;
    ```
-5. Note down your PostgreSQL password for the `postgres` user, as you will need it for the `.env` configuration step below.
+5. Connect to the newly created `securitas` database.
+6. Initialize the database schema by executing the `docsentinel_schema.sql` file located in the root of the project:
+   - **pgAdmin**: Open the Query Tool for the `securitas` database, copy-paste the contents of `docsentinel_schema.sql` and run it.
+   - **psql**: Run the following command in your terminal:
+     ```bash
+     psql -U postgres -d securitas -f docsentinel_schema.sql
+     ```
+7. Note down your PostgreSQL password for the `postgres` user, as you will need it for the `.env` configuration step below.
 
 ### Backend Setup
 1. Navigate to the backend directory:
@@ -71,6 +78,8 @@ RBAC remains the first authorization boundary. The Risk Engine can further restr
 5. Run database migrations:
    ```bash
    alembic upgrade head
+   # Note: If you get an Application Control error on Windows, run this instead:
+   # python -m alembic upgrade head
    ```
 6. Start the server:
    ```bash
