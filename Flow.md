@@ -5700,3 +5700,40 @@ Step 4
 
 ---
 
+
+
+## Stage 1 Authentication Flows
+
+### Registration Flow
+1. Client POSTs to `/api/auth/register` with email and strong password.
+2. Server validates password policy.
+3. Server checks account uniqueness (returns 409 if duplicate).
+4. Server hashes password using Argon2.
+5. Server assigns the default `EMPLOYEE` role.
+6. DB Transaction commits atomically.
+7. Server returns sanitized `UserResponse`.
+
+### Login & Session Creation Flow
+1. Client POSTs to `/api/auth/login` with email and password.
+2. Server verifies user exists and Argon2 hash matches. (Generic 401 on failure).
+3. Server checks if the user is active.
+4. Server generates unique `jti` and sets expiration.
+5. Server generates JWT with `sub`, `jti`, `iat`, `exp`, `type`.
+6. Server inserts `auth_sessions` record mapping `jti` to `user_id`, capturing IP and User-Agent.
+7. DB Transaction commits atomically.
+8. Server returns JWT Bearer token.
+
+### Protected Request Flow (e.g. `/me`)
+1. Client sends request with `Authorization: Bearer <token>`.
+2. `get_current_user` dependency intercepts request.
+3. Decodes JWT and validates signature.
+4. Extracts `jti` and queries `auth_sessions`.
+5. Verifies session exists, `revoked_at IS NULL`, and `current time < expires_at`.
+6. Returns `User` object for downstream use.
+
+### Logout / Revocation Flow
+1. Client POSTs to `/api/auth/logout` with Bearer token.
+2. Server decodes JWT and extracts `jti`.
+3. Server queries `auth_sessions` for that specific `jti`.
+4. Server updates session setting `revoked_at = CURRENT_TIMESTAMP`.
+5. Server commits to DB. Token is now permanently invalid.
