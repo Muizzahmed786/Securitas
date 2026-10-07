@@ -1,12 +1,11 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
+from dotenv import load_dotenv
 
-class Settings(BaseSettings):
-    PROJECT_NAME: str = "Securitas"
-    DATABASE_URL: str
-    SECRET_KEY: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    JWT_ALGORITHM: str = "HS256"
-    
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+load_dotenv()
 
-settings = Settings()
+DATABASE_URL = os.environ["DATABASE_URL"]
+ACCESS_TOKEN_SECRET = os.environ["ACCESS_TOKEN_SECRET"]
+REFRESH_TOKEN_SECRET = os.environ["REFRESH_TOKEN_SECRET"]
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+ACCESS_TOKEN_SECONDS = int(os.getenv("ACCESS_TOKEN_SECONDS", 900))
+REFRESH_TOKEN_SECONDS = int(os.getenv("REFRESH_TOKEN_SECONDS", 604800))
