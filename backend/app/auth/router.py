@@ -1,132 +1,240 @@
 import uuid
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-
+from datetime import datetime, timedelta, timezone
+import bcrypt
+import jwt
+from sqlalchemy import text
+from fastapi import Depends, APIRouter, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from app.utils.ApiError import ApiError
+from app.utils.ApiResponse import ApiResponse
+from app.config import *
 from app.database import get_db
-from app.users.models import User, Role, AuthSession
-from app.auth.schemas import UserCreate, UserResponse, Token
-from app.auth.security import get_password_hash, verify_password, create_access_token
-from app.auth.dependencies import get_current_active_user, get_current_user
+from app.utils.FormatRequest import *
 
 router = APIRouter()
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
-    # Validate uniqueness
-    stmt = select(User).where(User.email == user_in.email)
-    existing_user = (await db.execute(stmt)).scalar_one_or_none()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    # Get EMPLOYEE role
-    role_stmt = select(Role).where(Role.name == "EMPLOYEE")
-    employee_role = (await db.execute(role_stmt)).scalar_one_or_none()
-    if not employee_role:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Default role missing")
+def hash_password(password):
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        raise ApiError(400, "Password must not exceed 72 UTF-8 bytes")
+    return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
 
-    hashed_password = get_password_hash(user_in.password)
-    
-    new_user = User(
-        email=user_in.email,
-        password_hash=hashed_password,
-        role_id=employee_role.id
+
+def is_password_correct(password, password_hash):
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        return False
+    return bcrypt.checkpw(password_bytes, password_hash.encode("utf-8"))
+
+
+def generate_tokens(user_id):
+    now = datetime.now(timezone.utc)
+    access_payload = {
+        "id": str(user_id),
+        "type": "access",
+        "iat": now,
+        "exp": now + timedelta(seconds=ACCESS_TOKEN_SECONDS)
+    }
+    refresh_payload = {
+        "id": str(user_id),
+        "type": "refresh",
+        "iat": now,
+        "exp": now + timedelta(seconds=REFRESH_TOKEN_SECONDS),
+        "jti": str(uuid.uuid4())
+    }
+    access_token = jwt.encode(
+        access_payload, ACCESS_TOKEN_SECRET, algorithm="HS256"
     )
-    db.add(new_user)
-    
+    refresh_token = jwt.encode(
+        refresh_payload, REFRESH_TOKEN_SECRET, algorithm="HS256"
+    )
+    return access_token, refresh_token
+
+
+def verify_token(token, secret, expected_type):
     try:
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={"require": ["id", "type", "exp"]}
+        )
+    except jwt.ExpiredSignatureError:
+        raise ApiError(401, "Token has expired")
+    except jwt.InvalidTokenError:
+        raise ApiError(401, "Invalid token")
+    if payload["type"] != expected_type:
+        raise ApiError(401, "Invalid token type")
+    if not isinstance(payload["id"], str):
+        raise ApiError(401, "Invalid token user ID")
+    return payload
+
+
+def set_auth_cookies(response, access_token, refresh_token):
+    response.set_cookie(
+        key="accessToken", value=access_token,
+        httponly=True, secure=COOKIE_SECURE, samesite="lax",
+        path="/", max_age=ACCESS_TOKEN_SECONDS
+    )
+    response.set_cookie(
+        key="refreshToken", value=refresh_token,
+        httponly=True, secure=COOKIE_SECURE, samesite="lax",
+        path="/", max_age=REFRESH_TOKEN_SECONDS
+    )
+
+
+async def find_user(db, user_id):
+    result = await db.execute(
+        text("""
+        SELECT u.id, u.email, u.role_id, r.name AS role,
+               u.is_active, u.created_at, u.updated_at
+        FROM users AS u
+        JOIN roles AS r ON r.id = u.role_id
+        WHERE u.id::text = :user_id
+        """),
+        {"user_id": str(user_id)}
+    )
+    user = result.mappings().first()
+    if user is None:
+        raise ApiError(401, "Invalid token user")
+    if not user["is_active"]:
+        raise ApiError(403, "User account is inactive")
+    return dict(user)
+
+
+async def verify_jwt(request: Request, db=Depends(get_db)):
+    token = request.cookies.get("accessToken")
+    if not token:
+        authorization = request.headers.get("Authorization", "")
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+    if not token:
+        raise ApiError(401, "Unauthorized request")
+    payload = verify_token(token, ACCESS_TOKEN_SECRET, "access")
+    return await find_user(db, payload["id"])
+
+
+@router.post("/register", status_code=201)
+async def register(request: Request, db=Depends(get_db)):
+    body = await read_body(request)
+    email = required_string(body, "email").strip().lower()
+    password = required_string(body, "password")
+    role_id = int(body.get("role_id"))
+
+    if role_id not in [1, 2, 3, 4]:
+        raise ApiError(400, "role_id must be an integer: 1, 2, 3, or 4")
+
+    if "is_active" in body:
+        raise ApiError(400, "Account status cannot be set at registration")
+
+    role_result = await db.execute(
+        text("SELECT id, name FROM roles WHERE id = :role_id"),
+        {"role_id": role_id}
+    )
+    role = role_result.mappings().first()
+    if role is None:
+        raise ApiError(400, "Selected role does not exist")
+
+    user_result = await db.execute(
+        text("SELECT id FROM users WHERE email = :email"),
+        {"email": email}
+    )
+    existing_user = user_result.mappings().first()
+    if existing_user is not None:
+        raise ApiError(409, "User with this email already exists")
+
+    password_hash = await run_in_threadpool(hash_password, password)
+    try:
+        created_user_result = await db.execute(
+            text("""
+            INSERT INTO users (
+                email, password_hash, role_id, is_active, created_at, updated_at
+            )
+            VALUES (:email, :password_hash, :role_id, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id, email, role_id, is_active, created_at, updated_at
+            """),
+            {"email": email, "password_hash": password_hash, "role_id": role["id"]}
+        )
         await db.commit()
-        await db.refresh(new_user)
-    except IntegrityError:
+        created_user = created_user_result.mappings().first()
+    except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+        if "unique constraint" in str(e).lower() or "duplicate key" in str(e).lower():
+            raise ApiError(409, "User details already exist")
+        raise e
 
-    return new_user
+    user = dict(created_user)
+    user["role"] = role["name"]
+    return ApiResponse(201, user, "User registered successfully")
 
-@router.post("/login", response_model=Token, status_code=status.HTTP_200_OK)
-async def login(
-    request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_db)
-):
-    invalid_creds_exc = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+
+@router.post("/login")
+async def login(request: Request, response: Response, db=Depends(get_db)):
+    body = await read_body(request)
+    email = required_string(body, "email").strip().lower()
+    password = required_string(body, "password")
+    user_result = await db.execute(
+        text("SELECT id, password_hash FROM users WHERE email = :email"),
+        {"email": email}
     )
-    
-    stmt = select(User).where(User.email == form_data.username)
-    user = (await db.execute(stmt)).scalar_one_or_none()
-    
-    if not user:
-        raise invalid_creds_exc
-        
-    if not verify_password(form_data.password, user.password_hash):
-        raise invalid_creds_exc
-
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
-
-    jti = uuid.uuid4()
-    access_token, expire = create_access_token(user_id=user.id, jti=jti)
-    
-    # Capture IP and User Agent
-    client_host = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-
-    session_record = AuthSession(
-        user_id=user.id,
-        jwt_jti=jti,
-        expires_at=expire,
-        ip_address=client_host,
-        user_agent=user_agent
+    print(user_result)
+    user = user_result.mappings().first()
+    if user is None:
+        raise ApiError(401, "Invalid user credentials")
+    password_valid = await run_in_threadpool(
+        is_password_correct, password, user["password_hash"]
     )
-    db.add(session_record)
-    
-    try:
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create session")
-        
-    return {"access_token": access_token, "token_type": "bearer"}
+    if not password_valid:
+        raise ApiError(401, "Invalid user credentials")
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(
-    request: Request,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    logged_in_user = await find_user(db, str(user["id"]))
+    access_token, refresh_token = generate_tokens(user["id"])
+    set_auth_cookies(response, access_token, refresh_token)
+    return ApiResponse(200, {
+        "user": logged_in_user,
+        "accessToken": access_token,
+        "refreshToken": refresh_token
+    }, "User logged in successfully")
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    response.delete_cookie(
+        "accessToken", path="/", httponly=True,
+        secure=COOKIE_SECURE, samesite="lax"
+    )
+    response.delete_cookie(
+        "refreshToken", path="/", httponly=True,
+        secure=COOKIE_SECURE, samesite="lax"
+    )
+    return ApiResponse(200, {}, "Authentication cookies cleared")
+
+
+@router.get("/get-current-user")
+async def get_current_user(user=Depends(verify_jwt)):
+    return ApiResponse(200, user, "Current user fetched successfully")
+
+
+@router.post("/refresh-access-token")
+async def refresh_access_token(
+    request: Request, response: Response, db=Depends(get_db)
 ):
-    # Extract token from the Authorization header to find JTI
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authorization header")
-        
-    token = auth_header.split(" ")[1]
-    from app.auth.security import decode_access_token
-    payload = decode_access_token(token)
-    if payload is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        
-    jti_str = payload.get("jti")
-    try:
-        jti = uuid.UUID(jti_str)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token JTI")
+    refresh_token = request.cookies.get("refreshToken")
+    if not refresh_token:
+        body = await read_body(request)
+        refresh_token = required_string(body, "refreshToken")
+    payload = verify_token(refresh_token, REFRESH_TOKEN_SECRET, "refresh")
+    user = await find_user(db, payload["id"])
 
-    # Find the session and revoke it
-    stmt = select(AuthSession).where(AuthSession.jwt_jti == jti)
-    session_record = (await db.execute(stmt)).scalar_one_or_none()
-    
-    if session_record and session_record.revoked_at is None:
-        session_record.revoked_at = datetime.now(timezone.utc)
-        await db.commit()
-        
-    return None
-
-@router.get("/me", response_model=UserResponse)
-async def read_users_me(current_user: User = Depends(get_current_active_user)):
-    return current_user
+    access_token, unused_refresh_token = generate_tokens(user["id"])
+    response.set_cookie(
+        key="accessToken", value=access_token,
+        httponly=True, secure=COOKIE_SECURE, samesite="lax",
+        path="/", max_age=ACCESS_TOKEN_SECONDS
+    )
+    return ApiResponse(200, {
+        "accessToken": access_token,
+        "refreshToken": refresh_token
+    }, "Access token refreshed")
