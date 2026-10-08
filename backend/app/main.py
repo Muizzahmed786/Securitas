@@ -6,6 +6,7 @@ from app.auth.router import router as auth_router
 from app.rbac.router import router as rbac_router
 from app.documents.router import router as document_router
 from app.cryptoKeys.router import router as crypto_keys_router
+from app.signatures.router import router as signatures_router
 
 app = FastAPI()
 
@@ -26,7 +27,7 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(rbac_router, prefix="/api/rbac", tags=["rbac"])
 app.include_router(document_router,prefix="/api/documents",tags=["docs"])
 app.include_router(crypto_keys_router,prefix="/api/crypto-keys",tags=["Crypto Keys"],)
-
+app.include_router(signatures_router,prefix="/api/signatures",tags=["Signatures"],)
 
 @app.get("/health")
 async def health_check():

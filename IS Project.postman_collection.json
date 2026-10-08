@@ -1,0 +1,256 @@
+{
+  "info": {
+    "_postman_id": "50700a30-0a25-4cbb-86df-d26c0f84af8b",
+    "name": "IS Project",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "46313273",
+    "_collection_link": "https://go.postman.co/collection/46313273-50700a30-0a25-4cbb-86df-d26c0f84af8b?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "auth",
+      "item": [
+        {
+          "name": "register",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"email\":\"auditor1@example.com\",\r\n    \"password\":\"password\",\r\n    \"role_id\":\"4\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{server}}/auth/register",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "login",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"email\":\"owner1@example.com\",\r\n    \"password\":\"password\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{server}}/auth/login",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "getCurrentUser",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}/auth/get-current-user",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "auth",
+                "get-current-user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "refereshAccessToken",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{server}}/auth/refresh-access-token",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "auth",
+                "refresh-access-token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{server}}/auth/logout",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "rbac",
+      "item": [
+        {
+          "name": "get-my-perms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}/rbac/get-my-permissions",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "rbac",
+                "get-my-permissions"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "docs",
+      "item": [
+        {
+          "name": "upload-document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [
+                    "/C:/Users/Samarth/Documents/CHAPTER HEADING.docx"
+                  ]
+                },
+                {
+                  "key": "classification",
+                  "value": "INTERNAL",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{server}}/documents/upload",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "documents",
+                "upload"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "generate-keys-for-sign",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{server}}/signatures/keys/generate",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "signatures",
+                "keys",
+                "generate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "list-signing-keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{server}}/signatures/keys",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "signatures",
+                "keys"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "keys",
+      "item": [
+        {
+          "name": "generate_rsa_keys",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{server}}/crypto-keys/wrapping",
+              "host": [
+                "{{server}}"
+              ],
+              "path": [
+                "crypto-keys",
+                "wrapping"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
