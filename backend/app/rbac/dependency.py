@@ -1,7 +1,7 @@
 from fastapi import Depends
 from sqlalchemy import text
 from app.database import get_db
-from app.utils import ApiError
+from app.utils.ApiError import ApiError
 from app.auth.router import verify_jwt
 
 

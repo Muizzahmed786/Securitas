@@ -6,7 +6,7 @@ It records important decisions made during development so that a developer encou
 
 ---
 
-## ADR-001 — Project Name
+## ADR-001 â€” Project Name
 
 **Status:** Accepted
 
@@ -61,7 +61,7 @@ Accepted and applied to all root documentation.
 
 ---
 
-## ADR-002 — Primary Database
+## ADR-002 â€” Primary Database
 
 **Status:** Accepted
 
@@ -116,7 +116,7 @@ Accepted for the MVP architecture.
 
 ---
 
-## ADR-003 — Encrypted File Storage Separation
+## ADR-003 â€” Encrypted File Storage Separation
 
 **Status:** Accepted
 
@@ -171,7 +171,7 @@ Accepted.
 
 ---
 
-## ADR-004 — RBAC Before Risk
+## ADR-004 â€” RBAC Before Risk
 
 **Status:** Accepted
 
@@ -227,7 +227,7 @@ Accepted.
 
 ---
 
-## ADR-005 — Rule-Based Risk Engine for MVP
+## ADR-005 â€” Rule-Based Risk Engine for MVP
 
 **Status:** Accepted
 
@@ -284,7 +284,7 @@ Accepted for MVP. ML may be evaluated later against this rule-based baseline.
 
 ---
 
-## ADR-006 — Risk Factors
+## ADR-006 â€” Risk Factors
 
 **Status:** Accepted
 
@@ -345,7 +345,7 @@ Accepted.
 
 ---
 
-## ADR-007 — Risk Thresholds
+## ADR-007 â€” Risk Thresholds
 
 **Status:** Accepted
 
@@ -360,10 +360,10 @@ The Risk Engine outputs a score between 0 and 100. This score must be mapped to 
 ### Decision
 
 Define the levels as:
-- **LOW**: 0-30 → ALLOW
-- **MEDIUM**: 31-60 → ALLOW / MONITOR
-- **HIGH**: 61-80 → STEP-UP AUTH / RESTRICT
-- **CRITICAL**: 81-100 → BLOCK
+- **LOW**: 0-30 â†’ ALLOW
+- **MEDIUM**: 31-60 â†’ ALLOW / MONITOR
+- **HIGH**: 61-80 â†’ STEP-UP AUTH / RESTRICT
+- **CRITICAL**: 81-100 â†’ BLOCK
 
 These thresholds **must be configurable** dynamically or via environment variables.
 
@@ -405,7 +405,7 @@ Accepted.
 
 ---
 
-## ADR-008 — Role Does Not Automatically Reduce Risk
+## ADR-008 â€” Role Does Not Automatically Reduce Risk
 
 **Status:** Accepted
 
@@ -459,7 +459,7 @@ Accepted.
 
 ---
 
-## ADR-009 — Do Not Automatically Permanently Revoke Accounts
+## ADR-009 â€” Do Not Automatically Permanently Revoke Accounts
 
 **Status:** Accepted
 
@@ -514,7 +514,7 @@ Accepted.
 
 ---
 
-## ADR-010 � Authentication Architecture (Stage 1)
+## ADR-010 — Authentication Architecture (Stage 1)
 
 **Status:** Accepted
 
@@ -545,3 +545,22 @@ Pure stateless JWTs cannot be explicitly revoked before expiration, which is una
 - **Negative:** Authentication requires a database lookup to check session status.
 
 ---
+
+
+## ADR-011 — Progress-check milestone (2026-10-08)
+
+Implemented on `suraj`: JSON authentication using the existing bcrypt password
+hashes, revocable server-side sessions, owner-only encrypted upload/list/download,
+and a browser interface. Public registration assigns DOCUMENT_OWNER; an operator
+can promote an existing setup account using the local manage.py command.
+
+The cryptography module uses `cryptography`: AES-256-GCM with the document UUID
+as associated data, RSA-OAEP-SHA256 DEK protection, and encrypted PKCS8 private
+keys. Nonce/tag/ciphertext layout remains compatible with the previous uploads.
+SHA-256 is stored only to satisfy the existing schema; a separate verification
+feature and tampering demonstration are deferred at the user's request.
+
+This supersedes ADR-010's Argon2/sub-claim implementation target for the current
+milestone. Session JWTs use id/jti/iat/exp/type and the existing response envelope.
+The supplied schema and manage.py init-db are the authoritative setup; migrating
+the schema into nonempty Alembic revisions remains future work.

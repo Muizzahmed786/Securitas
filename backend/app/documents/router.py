@@ -5,16 +5,17 @@ import logging
 import os
 import zipfile
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import olefile
-from Cryptodome.Cipher import AES, PKCS1_OAEP
-from Cryptodome.Hash import SHA256
-from Cryptodome.PublicKey import RSA
-from Cryptodome.Random import get_random_bytes
+from app.crypto.encryption import encrypt_document, decrypt_document
+from app.crypto.key_manager import load_private_key
+from app.cryptoKeys.router import get_private_key_settings
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+from urllib.parse import quote
 from sqlalchemy import text
 
 from app.database import get_db
@@ -42,6 +43,7 @@ def get_upload_directory():
 
 
 MIME_TYPES = {
+    ".txt": "text/plain; charset=utf-8",
     ".pdf": "application/pdf",
     ".doc": "application/msword",
     ".docx": (
@@ -71,9 +73,15 @@ def validate_document(filename: str, data: bytes):
 
     extension = Path(filename).suffix.lower()
     if extension not in MIME_TYPES:
-        raise ApiError(415, "Only PDF, DOC, and DOCX files are supported")
+        raise ApiError(415, "Only TXT, PDF, DOC, and DOCX files are supported")
 
-    if extension == ".pdf":
+    if extension == ".txt":
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ApiError(415, "TXT files must use UTF-8 encoding") from error
+
+    elif extension == ".pdf":
         if not data.startswith(b"%PDF-"):
             raise ApiError(415, "File does not appear to be a PDF")
 
@@ -152,56 +160,6 @@ async def get_wrapping_key(db):
         logger.error("Private key file is unavailable for wrapping key %s", key["id"])
         raise ApiError(503, "The configured wrapping private key file is unavailable")
     return key
-
-
-def import_wrapping_public_key(public_key_pem):
-    """Accept canonical PEM and legacy escaped/single-line public PEM."""
-    try:
-        if isinstance(public_key_pem, bytes):
-            public_key_pem = public_key_pem.decode("ascii")
-        if not isinstance(public_key_pem, str):
-            raise ValueError("Public PEM must be text")
-
-        clean_pem = (
-            public_key_pem.replace("\\r\\n", "\n")
-            .replace("\\n", "\n")
-            .replace("\r\n", "\n")
-            .strip()
-        )
-        header = "-----BEGIN PUBLIC KEY-----"
-        footer = "-----END PUBLIC KEY-----"
-        if not (clean_pem.startswith(header) and clean_pem.endswith(footer)):
-            raise ValueError("Expected a public-key PEM")
-        body = "".join(clean_pem[len(header):-len(footer)].split())
-        clean_pem = header + "\n" + "\n".join(
-            body[index:index + 64] for index in range(0, len(body), 64)
-        ) + "\n" + footer
-
-        public_key = RSA.import_key(clean_pem)
-        if public_key.has_private() or public_key.size_in_bits() < 2048:
-            raise ValueError("Expected an RSA public key of at least 2048 bits")
-        return public_key
-    except (ValueError, TypeError, IndexError) as error:
-        # Never log the supplied key material.
-        logger.error("Configured document wrapping public key is invalid")
-        raise ApiError(503, "The configured RSA wrapping public key is invalid") from error
-
-
-def encrypt_document(data: bytes, public_key_pem: str, document_id):
-    public_key = import_wrapping_public_key(public_key_pem)
-    aes_key = get_random_bytes(32)
-    nonce = get_random_bytes(12)
-    cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce, mac_len=16)
-    cipher.update(str(document_id).encode("utf-8"))
-    ciphertext, authentication_tag = cipher.encrypt_and_digest(data)
-    rsa_cipher = PKCS1_OAEP.new(public_key, hashAlgo=SHA256)
-    return {
-        "ciphertext": ciphertext,
-        "nonce": nonce,
-        "authentication_tag": authentication_tag,
-        "encrypted_dek": rsa_cipher.encrypt(aes_key),
-        "content_hash": SHA256.new(data).hexdigest(),
-    }
 
 
 def write_encrypted_file(path: Path, ciphertext: bytes):
@@ -341,4 +299,70 @@ async def upload_document(
             "created_at": created_at.isoformat(),
         },
         "Document uploaded and encrypted successfully",
+    )
+
+
+@router.get("")
+async def list_documents(
+    user=Depends(require_permission("documents.read")), db=Depends(get_db),
+):
+    result = await db.execute(text("""
+        SELECT id, filename, mime_type, file_size_bytes, classification, created_at
+        FROM documents WHERE owner_id = :owner_id AND deleted_at IS NULL
+        ORDER BY created_at DESC, id DESC
+    """), {"owner_id": user["id"]})
+    return ApiResponse(200, {"documents": [dict(row) for row in result.mappings().all()]})
+
+
+def read_and_decrypt_document(document):
+    # Only opaque UUID-named ciphertext files inside the configured storage root.
+    expected = get_upload_directory() / f"{document['id']}.enc"
+    supplied = Path(document["storage_path"])
+    stored = supplied.resolve()
+    if stored != expected or supplied.is_symlink():
+        raise ValueError("Invalid document storage location")
+    if not stored.is_file() or stored.stat().st_size > MAX_FILE_SIZE:
+        raise ValueError("Encrypted document unavailable")
+    passphrase, directory = get_private_key_settings()
+    private_path = Path(document["secret_ref"]).resolve()
+    if private_path.parent != directory:
+        raise ValueError("Invalid key storage location")
+    private_key = load_private_key(private_path.read_bytes(), passphrase)
+    return decrypt_document(stored.read_bytes(), document, private_key)
+
+
+@router.get("/{document_id}/download")
+async def download_document(
+    document_id: UUID,
+    user=Depends(require_permission("documents.download")), db=Depends(get_db),
+):
+    # Constrain the SQL by owner before looking up storage paths or key material.
+    result = await db.execute(text("""
+        SELECT d.*, k.secret_ref FROM documents d
+        JOIN crypto_keys k ON k.id = d.wrapping_key_id
+        WHERE d.id = :document_id AND d.owner_id = :owner_id AND d.deleted_at IS NULL
+          AND k.purpose = 'KEY_WRAPPING' AND k.algorithm = 'RSA-OAEP-SHA256'
+          AND k.status = 'ACTIVE' AND k.revoked_at IS NULL
+          AND (k.expires_at IS NULL OR k.expires_at > CURRENT_TIMESTAMP)
+    """), {"document_id": document_id, "owner_id": user["id"]})
+    document = result.mappings().first()
+    if document is None:
+        raise ApiError(404, "Document unavailable")
+    try:
+        plaintext = await run_in_threadpool(read_and_decrypt_document, document)
+        await db.execute(text("""
+            INSERT INTO audit_events (request_id, user_id, document_id, action, status)
+            VALUES (:request_id, :user_id, :document_id, 'documents.download', 'SUCCESS')
+        """), {"request_id": uuid4(), "user_id": user["id"], "document_id": document_id})
+        await db.commit()
+    except Exception as error:
+        await db.rollback()
+        logger.error("Document download failed for %s (%s)", document_id, type(error).__name__)
+        raise ApiError(503, "Document could not be downloaded") from error
+    return Response(
+        content=plaintext, media_type=document["mime_type"] or "application/octet-stream",
+        headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(document["filename"], safe=""),
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        },
     )

@@ -1,117 +1,141 @@
-import pytest
-from httpx import AsyncClient, ASGITransport
-import uuid
-import jwt
-from app.config import settings
-from app.main import app
+"""Integration tests use a random schema in TEST_DATABASE_URL, never production tables."""
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from uuid import UUID, uuid4
 
-pytestmark = pytest.mark.asyncio
+TEST_DATABASE_URL = os.getenv('TEST_DATABASE_URL')
 
-@pytest.fixture
-async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+@unittest.skipUnless(TEST_DATABASE_URL, 'Set TEST_DATABASE_URL for PostgreSQL/API tests')
+class ProgressIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        os.environ.setdefault('DATABASE_URL', TEST_DATABASE_URL)
+        os.environ.setdefault('ACCESS_TOKEN_SECRET', 'integration-access-secret-1234567890123456789')
+        os.environ.setdefault('REFRESH_TOKEN_SECRET', 'integration-refresh-secret-1234567890123456789')
+        self.old_env = {k: os.environ.get(k) for k in ['DOCUMENT_STORAGE_DIR', 'RSA_PRIVATE_KEY_DIR', 'RSA_PRIVATE_KEY_PASSPHRASE']}
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+        from app.database import get_db
+        from app.crypto.key_manager import generate_rsa_key_pair
+        from app.cryptoKeys.router import write_private_key
+        from sqlalchemy import text
+        self.text, self.app, self.get_db = text, app, get_db
+        self.temp = tempfile.TemporaryDirectory()
+        os.environ['DOCUMENT_STORAGE_DIR'] = self.temp.name + '/files'
+        os.environ['RSA_PRIVATE_KEY_DIR'] = self.temp.name + '/keys'
+        os.environ['RSA_PRIVATE_KEY_PASSPHRASE'] = 'integration-key-passphrase-123456789'
+        self.schema = 'test_' + uuid4().hex
+        self.engine = create_async_engine(TEST_DATABASE_URL, connect_args={'server_settings': {'search_path': self.schema}})
+        async with self.engine.connect() as connection:
+            raw = await connection.get_raw_connection()
+            await raw.driver_connection.execute(f'CREATE SCHEMA {self.schema}')
+            script = (Path(__file__).resolve().parents[2] / 'docsentinel_schema.sql').read_text()
+            await raw.driver_connection.execute(script)
+            await connection.commit()
+        self.sessions = async_sessionmaker(self.engine)
+        async def override():
+            async with self.sessions() as session:
+                yield session
+        app.dependency_overrides[get_db] = override
+        self.client = AsyncClient(transport=ASGITransport(app=app), base_url='http://test')
+        key_id = uuid4()
+        public, private = generate_rsa_key_pair(os.environ['RSA_PRIVATE_KEY_PASSPHRASE'])
+        path = Path(self.temp.name) / 'keys' / f'{key_id}.pem'
+        write_private_key(path, private)
+        async with self.sessions() as session:
+            await session.execute(text("""INSERT INTO crypto_keys (id,purpose,algorithm,public_key_pem,secret_ref)
+                VALUES (:id,'KEY_WRAPPING','RSA-OAEP-SHA256',:public,:secret)"""),
+                {'id': key_id, 'public': public, 'secret': str(path)})
+            await session.commit()
 
-def get_unique_email(prefix="test"):
-    return f"{prefix}_{uuid.uuid4().hex[:8]}@example.com"
+    async def asyncTearDown(self):
+        await self.client.aclose()
+        self.app.dependency_overrides.pop(self.get_db, None)
+        async with self.engine.begin() as connection:
+            await connection.execute(self.text(f'DROP SCHEMA {self.schema} CASCADE'))
+        await self.engine.dispose()
+        self.temp.cleanup()
+        for name, value in self.old_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
-async def test_register_success(client: AsyncClient):
-    email = get_unique_email("reg")
-    response = await client.post("/api/auth/register", json={
-        "email": email,
-        "password": "SuperSecretPassword123!"
-    })
-    assert response.status_code == 201
-    data = response.json()
-    assert data["email"] == email
-    assert "password_hash" not in data
-    assert "id" in data
+    async def login(self, email='owner@example.com'):
+        credentials = {'email': email, 'password': 'ProgressCheckPassword123!'}
+        response = await self.client.post('/api/auth/register', json=credentials)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()['data']['role'], 'DOCUMENT_OWNER')
+        response = await self.client.post('/api/auth/login', json=credentials)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()['data']
 
-async def test_register_duplicate(client: AsyncClient):
-    email = get_unique_email("dup")
-    await client.post("/api/auth/register", json={"email": email, "password": "SuperSecretPassword123!"})
-    response = await client.post("/api/auth/register", json={"email": email, "password": "SuperSecretPassword123!"})
-    assert response.status_code == 409
+    async def upload(self):
+        response = await self.client.post('/api/documents/upload',
+            files={'file': ('progress.txt', b'Private lab document\n', 'text/plain')},
+            data={'classification': 'CONFIDENTIAL'})
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()['data']['id']
 
-async def test_register_weak_password(client: AsyncClient):
-    response = await client.post("/api/auth/register", json={
-        "email": get_unique_email("weak"),
-        "password": "short"
-    })
-    assert response.status_code == 422
-    
-    response = await client.post("/api/auth/register", json={
-        "email": get_unique_email("space"),
-        "password": "            "
-    })
-    assert response.status_code == 422
+    async def test_upload_list_download(self):
+        await self.login()
+        document_id = await self.upload()
+        listing = await self.client.get('/api/documents')
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertEqual(listing.json()['data']['documents'][0]['id'], document_id)
+        downloaded = await self.client.get(f'/api/documents/{document_id}/download')
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertEqual(downloaded.content, b'Private lab document\n')
+        self.assertEqual(downloaded.headers['cache-control'], 'no-store')
+        stored = Path(os.environ['DOCUMENT_STORAGE_DIR'], document_id + '.enc').read_bytes()
+        self.assertNotIn(b'Private lab document', stored)
+        async with self.sessions() as session:
+            result = await session.execute(self.text('SELECT count(*) FROM audit_events WHERE document_id = :id'), {'id': UUID(document_id)})
+            self.assertEqual(result.scalar_one(), 2)
 
-async def test_login_success(client: AsyncClient):
-    email = get_unique_email("login")
-    await client.post("/api/auth/register", json={"email": email, "password": "SuperSecretPassword123!"})
-    response = await client.post("/api/auth/login", data={
-        "username": email,
-        "password": "SuperSecretPassword123!"
-    })
-    assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    
-    token = data["access_token"]
-    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-    assert "sub" in payload
-    assert "jti" in payload
-    assert "iat" in payload
-    assert "exp" in payload
-    assert payload["type"] == "access"
+    async def test_other_user_is_denied(self):
+        await self.login()
+        document_id = await self.upload()
+        await self.client.post('/api/auth/logout')
+        await self.login('other@example.com')
+        listing = await self.client.get('/api/documents')
+        self.assertEqual(listing.json()['data']['documents'], [])
+        response = await self.client.get(f'/api/documents/{document_id}/download')
+        self.assertEqual(response.status_code, 404, response.text)
 
-async def test_login_incorrect_password(client: AsyncClient):
-    email = get_unique_email("badpass")
-    await client.post("/api/auth/register", json={"email": email, "password": "SuperSecretPassword123!"})
-    response = await client.post("/api/auth/login", data={
-        "username": email,
-        "password": "WrongPassword!"
-    })
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid credentials"
+    async def test_anonymous_denied(self):
+        self.assertEqual((await self.client.get('/api/documents')).status_code, 401)
+        response = await self.client.post('/api/documents/upload', files={'file': ('a.txt', b'hello')})
+        self.assertEqual(response.status_code, 401)
 
-async def test_login_nonexistent_user(client: AsyncClient):
-    response = await client.post("/api/auth/login", data={
-        "username": "nobody@example.com",
-        "password": "SuperSecretPassword123!"
-    })
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid credentials"
+    async def test_admin_self_registration_denied(self):
+        response = await self.client.post('/api/auth/register', json={
+            'email': 'admin@example.com', 'password': 'ProgressCheckPassword123!', 'role_id': 1})
+        self.assertEqual(response.status_code, 400)
 
-async def test_protected_route_and_logout(client: AsyncClient):
-    email = get_unique_email("logout")
-    await client.post("/api/auth/register", json={"email": email, "password": "SuperSecretPassword123!"})
-    
-    # Login session 1
-    resp1 = await client.post("/api/auth/login", data={"username": email, "password": "SuperSecretPassword123!"})
-    token1 = resp1.json()["access_token"]
-    
-    # Login session 2
-    resp2 = await client.post("/api/auth/login", data={"username": email, "password": "SuperSecretPassword123!"})
-    token2 = resp2.json()["access_token"]
-    
-    # Access /me with token1
-    me_resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token1}"})
-    assert me_resp.status_code == 200
-    
-    # Logout session 1
-    logout_resp = await client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token1}"})
-    assert logout_resp.status_code == 204
-    
-    # Access /me with token1 should fail
-    me_resp_after = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token1}"})
-    assert me_resp_after.status_code == 401
-    
-    # Access /me with token2 should succeed
-    me_resp_token2 = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token2}"})
-    assert me_resp_token2.status_code == 200
+    async def test_logout_revokes_both_tokens(self):
+        identity = await self.login()
+        await self.client.post('/api/auth/logout')
+        self.client.cookies.clear()
+        response = await self.client.get('/api/auth/get-current-user', headers={'Authorization': 'Bearer ' + identity['accessToken']})
+        self.assertEqual(response.status_code, 401)
+        refreshed = await self.client.post('/api/auth/refresh-access-token', json={'refreshToken': identity['refreshToken']})
+        self.assertEqual(refreshed.status_code, 401)
 
-async def test_invalid_jwt(client: AsyncClient):
-    me_resp = await client.get("/api/auth/me", headers={"Authorization": "Bearer badtoken.xyz"})
-    assert me_resp.status_code == 401
+    async def test_invalid_files_rejected(self):
+        await self.login()
+        response = await self.client.post('/api/documents/upload', files={'file': ('fake.pdf', b'not PDF')})
+        self.assertEqual(response.status_code, 415)
+        response = await self.client.post('/api/documents/upload', files={'file': ('empty.txt', b'')})
+        self.assertEqual(response.status_code, 400)
+        response = await self.client.post('/api/documents/upload', files={'file': ('a.txt', b'ok')}, data={'classification': 'UNKNOWN'})
+        self.assertEqual(response.status_code, 400)
+
+    async def test_refresh(self):
+        identity = await self.login()
+        refreshed = await self.client.post('/api/auth/refresh-access-token')
+        self.assertEqual(refreshed.status_code, 200, refreshed.text)
+        self.assertEqual(refreshed.json()['data']['refreshToken'], identity['refreshToken'])
+        self.assertEqual((await self.client.get('/api/auth/get-current-user')).status_code, 200)
