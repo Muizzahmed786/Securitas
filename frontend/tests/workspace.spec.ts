@@ -13,7 +13,7 @@ async function mock(page: Page, permissions = permissionNames) {
   const pair = generateKeyPairSync('rsa', { modulusLength: 3072,
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
   const state = { generateCount: 0, uploadBody: '', signatureBody: null as { signing_key_id: string; signature_base64: string } | null, registerBody: null as { role_id: number } | null, generateFails: false }
-  await page.route('**/api/**', async route => {
+  await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     const send = (data: unknown, status = 200) => route.fulfill({ status, json: data })
     if (path === '/api/auth/login') { signedIn = true; return send(envelope({ user })) }
