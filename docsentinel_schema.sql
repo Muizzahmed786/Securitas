@@ -329,3 +329,48 @@ COMMIT;
 --    checked by time at runtime, not just the stored status string.
 -- 10. Search HMACs leak equality/frequency; filenames/classifications/hash are plaintext
 --     metadata in this MVP. Filter search results through authorization and risk.
+
+
+
+---NEW QUERY
+INSERT INTO role_permissions (role_id, permission_id)
+VALUES
+    -- ADMIN
+    (1, 1),   -- users.manage
+    (1, 2),   -- roles.manage
+    (1, 3),   -- policies.manage
+    (1, 4),   -- documents.upload
+    (1, 5),   -- documents.read
+    (1, 6),   -- documents.download
+    (1, 7),   -- documents.share
+    (1, 8),   -- documents.revoke
+    (1, 9),   -- documents.sign
+    (1, 10),  -- documents.verify
+    (1, 11),  -- documents.delete
+    (1, 12),  -- documents.search
+    (1, 13),  -- audit.read
+    (1, 14),  -- risk.read
+
+    -- DOCUMENT_OWNER
+    (2, 4),   -- documents.upload
+    (2, 5),   -- documents.read
+    (2, 6),   -- documents.download
+    (2, 7),   -- documents.share
+    (2, 8),   -- documents.revoke
+    (2, 9),   -- documents.sign
+    (2, 10),  -- documents.verify
+    (2, 11),  -- documents.delete
+    (2, 12),  -- documents.search
+
+    -- EMPLOYEE
+    (3, 5),   -- documents.read
+    (3, 6),   -- documents.download
+    (3, 10),  -- documents.verify
+    (3, 12),  -- documents.search
+
+    -- SECURITY_AUDITOR
+    (4, 10),  -- documents.verify
+    (4, 13),  -- audit.read
+    (4, 14)   -- risk.read
+
+ON CONFLICT (role_id, permission_id) DO NOTHING;
