@@ -12,7 +12,3 @@ argon2-cffi
 python-multipart
 pytest
 httpx
-bcrypt
-olefile
-python-dotenv
-pytest-asyncio

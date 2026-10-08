@@ -51,7 +51,3 @@ Thumbs.db
 # Database / SQLite
 *.sqlite3
 *.db
-
-# Private document/key storage (default locations)
-private_keys/
-private_uploads/

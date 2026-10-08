@@ -1,10 +1,3 @@
-> Progress-check update: the implemented milestone is registration/login/logout,
-> revocable sessions, owner-only encrypted upload/list/download, and the React UI.
-> The current source uses bcrypt and JSON auth endpoints. Older Stage 1 plans
-> below are historical targets where they disagree with these implementations.
-> Standalone hash verification, signatures, sharing, search, risk and tamper demos
-> are deferred. AES-GCM still validates its authentication tag on decryption.
-
 # Securitas File Contracts (`File_Contract.md`)
 
 This document is the **contract and reference for every important source file in Securitas**. 
@@ -47,8 +40,9 @@ To provide AES-GCM encryption and decryption functions for document content and 
 ### Public Interface
 
 ```text
-encrypt_document(data, public_key_pem, document_id) → {ciphertext, nonce, authentication_tag, encrypted_dek, content_hash}
-decrypt_document(ciphertext, metadata, private_key) → plaintext
+encrypt_document(plaintext) → (ciphertext, tag, dek)
+decrypt_document(ciphertext, dek, tag) → plaintext
+generate_dek() → dek
 ```
 
 ### Dependencies

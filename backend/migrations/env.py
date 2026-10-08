@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-from app.config import DATABASE_URL
+from app.config import settings
 from app.database import Base
 
 # this is the Alembic Config object, which provides
@@ -14,7 +14,7 @@ from app.database import Base
 config = context.config
 
 # Set sqlalchemy.url from our settings
-config.set_main_option("sqlalchemy.url", str(DATABASE_URL).replace("%", "%%"))
+config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URL).replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

@@ -3,7 +3,8 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from app.crypto.key_manager import generate_rsa_key_pair
+from Cryptodome.PublicKey import RSA
+from dotenv import load_dotenv
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text
@@ -37,6 +38,20 @@ def get_private_key_settings():
         directory = BACKEND_DIRECTORY / directory
 
     return passphrase, directory.resolve()
+
+
+def generate_rsa_key_pair(passphrase: str):
+    """Return a public PEM and a password-encrypted private PEM."""
+    key = RSA.generate(RSA_KEY_BITS)
+    public_pem = key.publickey().export_key(format="PEM").decode("ascii")
+    private_pem = key.export_key(
+        format="PEM",
+        pkcs=8,
+        passphrase=passphrase,
+        protection="PBKDF2WithHMAC-SHA512AndAES256-CBC",
+        prot_params={"iteration_count": 131072},
+    )
+    return public_pem, private_pem
 
 
 def write_private_key(path: Path, private_pem: bytes):

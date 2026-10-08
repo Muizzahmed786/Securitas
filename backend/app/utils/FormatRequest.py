@@ -2,8 +2,6 @@ from app.utils.ApiError import ApiError
 from app.utils.ApiResponse import ApiResponse
 
 async def read_body(request):
-    if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
-        raise ApiError(415, "Content-Type must be application/json")
     try:
         body = await request.json()
     except ValueError:
