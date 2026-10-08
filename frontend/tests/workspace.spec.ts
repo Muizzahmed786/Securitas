@@ -106,7 +106,7 @@ test('private-key generation downloads once and displays JSON blob failures', as
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Create & download private key' }).click()
   expect((await download).suggestedFilename()).toBe(`signing-${keyId}.pem`)
-  await expect(page.getByRole('status')).toContainText('Signing key created')
+  await expect(page.getByRole('status').filter({ hasText: 'Signing key created' })).toBeVisible()
   expect(state.generateCount).toBe(1)
   state.generateFails = true
   await page.getByRole('button', { name: 'Create & download private key' }).click()
