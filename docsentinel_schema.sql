@@ -333,6 +333,8 @@ COMMIT;
 
 
 ---NEW QUERY
+insert into permissions(name) values('crypto_keys.create')
+
 INSERT INTO role_permissions (role_id, permission_id)
 VALUES
     -- ADMIN
@@ -350,6 +352,7 @@ VALUES
     (1, 12),  -- documents.search
     (1, 13),  -- audit.read
     (1, 14),  -- risk.read
+    (1,15), --crypto_keys.create
 
     -- DOCUMENT_OWNER
     (2, 4),   -- documents.upload

@@ -136,5 +136,7 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+private_keys/
+private_uploads/
 
 # End of https://mrkandreev.name/snippets/gitignore-generator/#Python
