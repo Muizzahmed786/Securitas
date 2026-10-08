@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from app.auth.router import router as auth_router
 from app.utils.ApiError import ApiError
+from app.auth.router import router as auth_router
+from app.rbac.router import router as rbac_router
 
 app = FastAPI()
 
@@ -20,6 +21,7 @@ async def api_error_handler(request: Request, error: ApiError):
     )
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(rbac_router, prefix="/api/rbac", tags=["rbac"])
 
 @app.get("/health")
 async def health_check():
