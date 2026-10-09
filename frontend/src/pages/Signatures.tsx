@@ -1,226 +1,420 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
-import { KeyRound, PenLine, ShieldCheck, RefreshCw, Download, Ban, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { signatures, errorMessage, saveBlob } from '../api/client';
-import type { SigningKey, Verification } from '../api/client';
-import { normalizeSignature, signLocally } from '../api/signing';
-import { useAuth } from '../context/AuthContext';
-import { Alert, Card, CopyId, Empty, PageHeading, Spinner, formatDate, validUUID } from '../components/UI';
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
-type Tab = 'keys' | 'sign' | 'verify';
+import { signatures, errorMessage, saveBlob } from "../api/client";
+import type { SigningKey, Verification } from "../api/client";
+import { signLocally } from "../api/signing";
+import { useAuth } from "../context/AuthContext";
+
+import {
+  Alert,
+  Card,
+  PageHeading,
+  validUUID,
+} from "../components/UI";
 
 export default function Signatures() {
   const { can, receipts } = useAuth();
-  const canSign = can('documents.sign'), canVerify = can('documents.verify');
-  const [tab, setTab] = useState<Tab>('keys');
-  const activeTab = tab === 'verify' ? (canVerify ? 'verify' : 'keys') : (canSign ? tab : 'verify');
+
+  const canSign = can("documents.sign");
+  const canVerify = can("documents.verify");
+
   const [keys, setKeys] = useState<SigningKey[]>([]);
-  const [keyId, setKeyId] = useState('');
-  const [passphrase, setPassphrase] = useState('');
-  const [documentId, setDocumentId] = useState('');
-  const [original, setOriginal] = useState<File | null>(null);
-  const [privateFile, setPrivateFile] = useState<File | null>(null);
-  const [external, setExternal] = useState(false);
-  const [signature, setSignature] = useState('');
-  const [verification, setVerification] = useState<Verification | null>(null);
-  const [busy, setBusy] = useState(false);
   const [loadingKeys, setLoadingKeys] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [fileVersion, setFileVersion] = useState(0);
-  const actionLock = useRef(false);
-  const keyRequest = useRef(0);
 
-  const chooseKey = useCallback((result: SigningKey[], preferred?: string) => {
-    setKeys(result);
-    setKeyId(previous => {
-      const candidate = preferred || previous;
-      return result.some(key => key.id === candidate && key.usable_for_signing)
-        ? candidate : result.find(key => key.usable_for_signing)?.id || '';
-    });
-  }, []);
+  const [documentId, setDocumentId] = useState("");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [privateKeyFile, setPrivateKeyFile] = useState<File | null>(null);
+
+  const [verifyId, setVerifyId] = useState("");
+  const [result, setResult] = useState<Verification | null>(null);
+
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
   useEffect(() => {
-    const request = ++keyRequest.current;
-    let active = true;
-    if (!canSign) { setKeys([]); setKeyId(''); setLoadingKeys(false); return; }
-    setLoadingKeys(true);
-    signatures.keys().then(result => {
-      if (active && request === keyRequest.current) chooseKey(result);
-    }).catch(e => {
-      if (active && request === keyRequest.current) setError(errorMessage(e));
-    }).finally(() => {
-      if (active && request === keyRequest.current) setLoadingKeys(false);
-    });
-    return () => { active = false; };
-  }, [canSign, chooseKey]);
+    if (!canSign) return;
 
-  async function reload(preferred?: string) {
-    const request = ++keyRequest.current;
+    let active = true;
     setLoadingKeys(true);
+
+    signatures
+      .keys()
+      .then((data) => {
+        if (active) setKeys(data);
+      })
+      .catch((error) => {
+        if (active) setError(errorMessage(error));
+      })
+      .finally(() => {
+        if (active) setLoadingKeys(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [canSign]);
+
+  function start(action: string) {
+    setBusy(action);
+    setError("");
+    setMessage("");
+  }
+
+  async function generateKeys() {
+    start("generate");
+
     try {
-      const result = await signatures.keys();
-      if (request === keyRequest.current) chooseKey(result, preferred);
-    } catch (e) {
-      if (request === keyRequest.current) setError(`Could not refresh signing keys: ${errorMessage(e)}`);
+      // Blank passphrase creates a PEM usable by our browser helper.
+      const response = await signatures.generate("");
+
+      const id = String(
+        response.headers["x-signing-key-id"] || "",
+      ).trim();
+
+      saveBlob(
+        response.data,
+        validUUID(id)
+          ? `signing-${id}.pem`
+          : "signing-private-key.pem",
+      );
+
+      setMessage(
+        "Key created. Save the downloaded private PEM—you will need it to sign.",
+      );
+
+      // Refresh separately: failure here does not mean generation failed.
+      try {
+        setKeys(await signatures.keys());
+      } catch {
+        setError(
+          "The key was created, but the key list could not refresh. Reload the page before signing.",
+        );
+      }
+    } catch (error) {
+      setError(errorMessage(error));
     } finally {
-      if (request === keyRequest.current) setLoadingKeys(false);
+      setBusy("");
     }
   }
-  function begin() {
-    if (actionLock.current) return false;
-    actionLock.current = true;
-    setBusy(true); setError(''); setNotice('');
-    return true;
-  }
-  function finish() { actionLock.current = false; setBusy(false); }
-  function clearFiles() { setOriginal(null); setPrivateFile(null); setSignature(''); setFileVersion(v => v + 1); }
-  function changeTab(next: Tab) {
-    setTab(next); setError(''); setNotice(''); setVerification(null); setPassphrase(''); clearFiles();
-  }
-  async function generate(event: FormEvent) {
+
+  async function signDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!begin()) return;
-    try {
-      const length = new TextEncoder().encode(passphrase).length;
-      if (passphrase && (length < 12 || length > 128)) throw new Error('Passphrase must contain 12–128 UTF-8 bytes.');
-      const response = await signatures.generate(passphrase);
-      const headerId = String(response.headers['x-signing-key-id'] || '').trim();
-      const disposition = String(response.headers['content-disposition'] || '');
-      const filenameId = disposition.match(/signing-([0-9a-f-]{36})\.pem/i)?.[1] || '';
-      const id = validUUID(headerId) ? headerId : validUUID(filenameId) ? filenameId : '';
-      saveBlob(response.data, id ? `signing-${id}.pem` : 'signing-private-key.pem');
-      setPassphrase('');
-      setNotice('Key created and download requested. Confirm the PEM is saved; the server cannot provide it again.' +
-        (id ? '' : ' The key ID header was unavailable; select the new key from the refreshed list.'));
-      await reload(id);
-    } catch (e) { setError(errorMessage(e)); }
-    finally { finish(); }
-  }
-  async function revoke(key: SigningKey) {
-    if (!window.confirm('Revoke this signing key? Its public key and existing signatures will be retained.')) return;
-    if (!begin()) return;
-    try {
-      await signatures.revoke(key.id);
-      setNotice('Signing key revoked.');
-      await reload();
-    } catch (e) { setError(errorMessage(e)); }
-    finally { finish(); }
-  }
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!begin()) return;
+
+    const form = event.currentTarget;
+    start("sign");
+
     try {
       const id = documentId.trim();
-      if (!validUUID(id)) throw new Error('Enter a valid document ID.');
-      const selected = keys.find(key => key.id === keyId && key.usable_for_signing);
-      if (!selected || selected.algorithm !== 'RSA-PSS-SHA256') throw new Error('Select an active RSA-PSS-SHA256 signing key.');
-      let signed: string;
-      if (external) signed = normalizeSignature(signature);
-      else {
-        if (!original || !privateFile) throw new Error('Choose the original document and your private-key PEM.');
-        signed = await signLocally(original, privateFile, selected.public_key_pem);
+
+      if (!validUUID(id)) {
+        throw new Error("Choose a document or enter its valid document ID.");
       }
-      await signatures.submit(id, selected.id, signed);
-      setNotice('The server verified your signature against its stored document and saved it.');
-      setVerification(null); clearFiles();
-    } catch (e) { setError(errorMessage(e)); }
-    finally { finish(); }
+
+      if (!documentFile || !privateKeyFile) {
+        throw new Error("Choose the original document and private-key PEM.");
+      }
+
+      // Fetch current keys so newly created or revoked keys are accounted for.
+      const currentKeys = await signatures.keys();
+      setKeys(currentKeys);
+
+      const activeKeys = currentKeys.filter(
+        (key) =>
+          key.usable_for_signing &&
+          key.algorithm === "RSA-PSS-SHA256",
+      );
+
+      if (!activeKeys.length) {
+        throw new Error("Create an active signing key first.");
+      }
+
+      // Try the ID in the downloaded filename first, when available.
+      const filenameId = privateKeyFile.name.match(
+        /^signing-([0-9a-f-]{36})\.pem$/i,
+      )?.[1];
+
+      const candidates = [
+        ...activeKeys.filter((key) => key.id === filenameId),
+        ...activeKeys.filter((key) => key.id !== filenameId),
+      ];
+
+      let matchedKeyId = "";
+      let signature = "";
+
+      for (const key of candidates) {
+        try {
+          signature = await signLocally(
+            documentFile,
+            privateKeyFile,
+            key.public_key_pem,
+          );
+
+          matchedKeyId = key.id;
+          break;
+        } catch (error) {
+          // The existing helper gives this error for a different public key.
+          // Other errors, such as an invalid/encrypted PEM, should stop signing.
+          const mismatch =
+            error instanceof Error &&
+            error.message.startsWith(
+              "This private PEM does not match the selected signing key.",
+            );
+
+          if (!mismatch) throw error;
+        }
+      }
+
+      if (!matchedKeyId) {
+        throw new Error(
+          "This PEM does not match any of your active signing keys.",
+        );
+      }
+
+      await signatures.submit(id, matchedKeyId, signature);
+
+      setMessage("Document signature verified and saved.");
+      setDocumentFile(null);
+      setPrivateKeyFile(null);
+      setResult(null);
+
+      form
+        .querySelectorAll<HTMLInputElement>('input[type="file"]')
+        .forEach((input) => {
+          input.value = "";
+        });
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      setBusy("");
+    }
   }
-  async function verify(event: FormEvent) {
+
+  async function verifyDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!begin()) return;
-    setVerification(null);
+    start("verify");
+    setResult(null);
+
     try {
-      if (!validUUID(documentId.trim())) throw new Error('Enter a valid document ID.');
-      setVerification(await signatures.verify(documentId.trim()));
-    } catch (e) { setError(errorMessage(e)); }
-    finally { finish(); }
+      const id = verifyId.trim();
+
+      if (!validUUID(id)) {
+        throw new Error("Choose a document or enter its valid document ID.");
+      }
+
+      setResult(await signatures.verify(id));
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      setBusy("");
+    }
   }
 
-  const tabs = [
-    { key: 'keys' as const, label: 'Signing Keys', icon: KeyRound, show: canSign },
-    { key: 'sign' as const, label: 'Sign Document', icon: PenLine, show: canSign },
-    { key: 'verify' as const, label: 'Verify Signatures', icon: ShieldCheck, show: canVerify },
-  ].filter(item => item.show);
-  const documentField = <label className="field-label">Document ID
-    <input className="input-style font-mono text-xs" required placeholder="UUID from an upload receipt" value={documentId}
-      onChange={e => { setDocumentId(e.target.value); setVerification(null); }} list="session-document-ids" />
-    <datalist id="session-document-ids">{receipts.map(receipt => <option key={receipt.id} value={receipt.id}>{receipt.filename}</option>)}</datalist>
-  </label>;
+  return (
+    <>
+      <PageHeading
+        eyebrow="Documents"
+        title="Digital signatures"
+        description="Generate a key, sign a document, and verify its signature."
+      />
 
-  return <>
-    <PageHeading eyebrow="Document authenticity" title="Digital signatures"
-      description="Download your signing key once, sign locally after upload, and verify stored documents." />
-    {!tabs.length && <Empty title="Signatures unavailable" description="Your account has no signing or verification permission." />}
-    <div className="flex flex-wrap gap-2 rounded-xl border border-blue-100 bg-white p-2">
-      {tabs.map(({key, label, icon: Icon}) => <button key={key} disabled={busy} onClick={() => changeTab(key)}
-        className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold ${activeTab === key ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-blue-50'}`}>
-        <Icon size={16} />{label}</button>)}
-    </div>
-    <Alert message={error} /><Alert message={notice} success />
-    {activeTab === 'keys' && canSign && <>
-      <Card>
-        <h2 className="section-heading">Create a signing key</h2>
-        <p className="my-3 text-sm text-slate-500">The server stores your public key. Save the private PEM download on your device.</p>
-        <form onSubmit={generate}><fieldset disabled={busy} className="space-y-4">
-          <label className="field-label">Private-key passphrase (optional)
-            <input className="input-style" type="password" autoComplete="new-password" placeholder="Leave blank for browser signing"
-              value={passphrase} onChange={e => setPassphrase(e.target.value)} /></label>
-          <p className="text-xs leading-5 text-slate-500">Leave blank to sign with the browser tool. A passphrase encrypts the PEM; use a compatible local tool and Submit existing signature for encrypted keys. Protect an unencrypted PEM on your device.</p>
-          <button className="btn-primary">{busy ? <Spinner /> : <Download size={17} />}Create & download private key</button>
-        </fieldset></form>
-      </Card>
-      <Card>
-        <div className="flex items-center justify-between"><h2 className="section-heading">Your signing keys</h2>
-          <button className="btn-secondary" disabled={busy || loadingKeys} onClick={() => void reload()}><RefreshCw size={15} />Refresh</button></div>
-        {loadingKeys ? <p role="status" className="mt-5 flex gap-2"><Spinner />Loading keys…</p> : keys.length ?
-          <div className="mt-5 overflow-x-auto"><table className="data-table"><thead><tr><th>Key ID</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
-            <tbody>{keys.map(key => <tr key={key.id}>
-              <td><CopyId value={key.id} /><p className="text-xs text-slate-400">{key.algorithm}</p></td>
-              <td>{key.status}{!key.usable_for_signing && <p className="text-xs text-slate-400">Not usable for new signatures</p>}</td>
-              <td>{formatDate(key.created_at)}</td><td><div className="flex flex-wrap gap-2">
-                <button className="btn-secondary" onClick={() => saveBlob(new Blob([key.public_key_pem], {type: 'text/plain'}), `signing-public-${key.id}.pem`)}><Download size={14} />Public key</button>
-                {key.usable_for_signing && <button className="btn-secondary" disabled={busy} onClick={() => { changeTab('sign'); setKeyId(key.id); }}><PenLine size={14} />Use key</button>}
-                {key.status !== 'REVOKED' && <button className="btn-secondary !text-red-500" disabled={busy} onClick={() => void revoke(key)}><Ban size={14} />Revoke</button>}
-              </div></td></tr>)}</tbody></table></div> : <Empty title="No signing keys yet" description="Create a key and save the downloaded private PEM." />}
-      </Card>
-    </>}
-    {activeTab === 'sign' && canSign && <Card>
-      <form onSubmit={submit}><fieldset disabled={busy} className="max-w-3xl space-y-5">
-        {documentField}
-        <label className="field-label">Signing key<select className="input-style" required value={keyId} onChange={e => setKeyId(e.target.value)}>
-          <option value="">Select an active key</option>{keys.filter(key => key.usable_for_signing).map(key => <option key={key.id} value={key.id}>{key.id}</option>)}
-        </select></label>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={external ? 'btn-secondary' : 'btn-primary'} onClick={() => { setExternal(false); clearFiles(); }}>Sign in this browser</button>
-          <button type="button" className={external ? 'btn-primary' : 'btn-secondary'} onClick={() => { setExternal(true); clearFiles(); }}>Submit existing signature</button>
-        </div>
-        {external ? <label className="field-label">Base64 signature
-          <textarea className="input-style min-h-32 font-mono text-xs" required maxLength={2048} value={signature} onChange={e => setSignature(e.target.value)} placeholder="RSA-PSS / SHA-256, 32-byte salt; sign the original file bytes" />
-        </label> : <div key={fileVersion} className="space-y-5">
-          <label className="field-label">Original document<input className="input-style" type="file" required accept=".pdf,.doc,.docx" onChange={e => setOriginal(e.target.files?.[0] || null)} /></label>
-          <label className="field-label">Downloaded private-key PEM<input className="input-style" type="file" required accept=".pem" onChange={e => setPrivateFile(e.target.files?.[0] || null)} /></label>
-          <p className="rounded-xl border border-blue-100 bg-blue-50/30 p-4 text-xs leading-5 text-slate-500">Choose the exact original file you uploaded and the private PEM matching your selected key. Both files stay in this browser. Only the signature and key ID are sent for this document ID.</p>
-        </div>}
-        <button className="btn-primary" disabled={busy || loadingKeys || !keyId}>{busy ? <Spinner /> : <PenLine size={17} />}{busy ? 'Processing signature…' : external ? 'Submit signature' : 'Sign locally & submit'}</button>
-      </fieldset></form>
-    </Card>}
-    {activeTab === 'verify' && canVerify && <>
-      <Card><form onSubmit={verify}><fieldset disabled={busy} className="max-w-3xl space-y-5">{documentField}
-        <button className="btn-primary">{busy ? <Spinner /> : <ShieldCheck size={17} />}{busy ? 'Checking…' : 'Verify stored document'}</button>
-      </fieldset></form></Card>
-      {verification && <Card>
-        <h2 className="section-heading">Verification results</h2><CopyId value={verification.document_id} />
-        <p className={`my-4 font-semibold ${verification.document_integrity_valid ? 'text-emerald-700' : 'text-red-600'}`}>
-          {verification.document_integrity_valid ? 'Stored document integrity verified' : 'Stored document integrity check failed'}</p>
-        {verification.has_signatures ? <div className="space-y-4">{verification.signatures.map(item => <div key={item.id} className="rounded-xl border border-slate-200 p-4">
-          <p className={`flex items-center gap-2 font-semibold ${item.cryptographically_valid ? 'text-emerald-700' : 'text-red-600'}`}>
-            {item.cryptographically_valid ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}{item.cryptographically_valid ? 'Signature valid' : 'Signature invalid'}</p>
-          <CopyId value={item.signing_key_id} />
-          <p className="mt-2 text-xs text-slate-400">Recorded {formatDate(item.signed_at)} · Key status: {item.key_status}</p>
-          {!item.key_usable_now && <p className="mt-2 text-xs text-amber-600">This key cannot create new signatures. The historical signature result is shown above.</p>}
-        </div>)}</div> : <Empty title="No signatures recorded" description="An unsigned document does not have a signature to verify." />}
-      </Card>}
-    </>}
-  </>;
+      <Alert message={error} />
+      <Alert message={message} success />
+
+      <datalist id="uploaded-documents">
+        {receipts.map((receipt) => (
+          <option key={receipt.id} value={receipt.id}>
+            {receipt.filename}
+          </option>
+        ))}
+      </datalist>
+
+      {canSign && (
+        <>
+          <Card>
+            <h2 className="section-heading">1. Generate keys</h2>
+
+            <p className="my-3 text-sm text-slate-500">
+              Your public key is saved on the server. Your private key
+              downloads as a PEM file—keep it safe on your device.
+            </p>
+
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={Boolean(busy)}
+              onClick={generateKeys}
+            >
+              {busy === "generate"
+                ? "Generating…"
+                : "Generate & download key"}
+            </button>
+          </Card>
+
+          <Card>
+            <h2 className="section-heading">2. Sign a document</h2>
+
+            <form onSubmit={signDocument}>
+              <fieldset
+                disabled={Boolean(busy)}
+                className="mt-4 max-w-2xl space-y-4"
+              >
+                <label className="field-label">
+                  Uploaded document
+                  <input
+                    className="input-style"
+                    list="uploaded-documents"
+                    placeholder="Choose or paste the document ID"
+                    value={documentId}
+                    onChange={(event) =>
+                      setDocumentId(event.target.value)
+                    }
+                    required
+                  />
+                </label>
+
+                <label className="field-label">
+                  Original document file
+                  <input
+                    className="input-style"
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    onChange={(event) =>
+                      setDocumentFile(event.target.files?.[0] || null)
+                    }
+                    required
+                  />
+                </label>
+
+                <label className="field-label">
+                  Private key
+                  <input
+                    className="input-style"
+                    type="file"
+                    accept=".pem"
+                    onChange={(event) =>
+                      setPrivateKeyFile(event.target.files?.[0] || null)
+                    }
+                    required
+                  />
+                </label>
+
+                <p className="text-xs text-slate-500">
+                  Choose the exact file you uploaded. Signing happens
+                  in your browser; your private key is not uploaded.
+                </p>
+
+                <button
+                  className="btn-primary"
+                  disabled={Boolean(busy) || loadingKeys}
+                >
+                  {busy === "sign" ? "Signing…" : "Sign document"}
+                </button>
+
+                {!loadingKeys &&
+                  !keys.some((key) => key.usable_for_signing) && (
+                    <p className="text-xs text-slate-500">
+                      Generate a signing key above before signing.
+                    </p>
+                  )}
+              </fieldset>
+            </form>
+          </Card>
+        </>
+      )}
+
+      {canVerify && (
+        <Card>
+          <h2 className="section-heading">
+            {canSign ? "3. Verify a document" : "Verify a document"}
+          </h2>
+
+          <form onSubmit={verifyDocument}>
+            <fieldset
+              disabled={Boolean(busy)}
+              className="mt-4 max-w-2xl space-y-4"
+            >
+              <label className="field-label">
+                Uploaded document
+                <input
+                  className="input-style"
+                  list="uploaded-documents"
+                  placeholder="Choose or paste the document ID"
+                  value={verifyId}
+                  onChange={(event) => {
+                    setVerifyId(event.target.value);
+                    setResult(null);
+                  }}
+                  required
+                />
+              </label>
+
+              <button className="btn-primary">
+                {busy === "verify" ? "Verifying…" : "Verify"}
+              </button>
+            </fieldset>
+          </form>
+
+          {result && (
+            <div className="mt-5 space-y-3 text-sm">
+              <p
+                className={
+                  result.document_integrity_valid
+                    ? "text-emerald-700"
+                    : "text-red-600"
+                }
+              >
+                {result.document_integrity_valid
+                  ? "Stored document integrity verified."
+                  : "Stored document integrity check failed."}
+              </p>
+
+              {!result.has_signatures ? (
+                <p className="text-slate-500">
+                  This document has no recorded signatures.
+                </p>
+              ) : (
+                result.signatures.map((signature) => (
+                  <div
+                    key={signature.id}
+                    className="rounded-lg border border-slate-200 p-3"
+                  >
+                    <p
+                      className={
+                        signature.cryptographically_valid
+                          ? "font-medium text-emerald-700"
+                          : "font-medium text-red-600"
+                      }
+                    >
+                      {signature.cryptographically_valid
+                        ? "Signature valid"
+                        : "Signature invalid"}
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      Signer: {signature.signer_id} · Key status:{" "}
+                      {signature.key_status}
+                    </p>
+
+                    {!signature.key_usable_now && (
+                      <p className="mt-1 text-xs text-amber-700">
+                        This key is no longer usable for new signatures.
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {!canSign && !canVerify && (
+        <p className="text-sm text-slate-500">
+          Your account does not have signing or verification permission.
+        </p>
+      )}
+    </>
+  );
 }

@@ -93,7 +93,7 @@ async def plaintext_for(db, document):
     root = Path(configured).expanduser()
     if not root.is_absolute():
         root = BACKEND_DIRECTORY / root
-    password = os.getenv("WRAPPING_PRIVATE_KEY_PASSPHRASE") or None
+    password = os.getenv("RSA_PRIVATE_KEY_PASSPHRASE") or None
     try:
         return await run_in_threadpool(decrypt_document, document, wrapping, root, password)
     except Exception as error:
@@ -167,47 +167,64 @@ async def revoke_signing_key(key_id: str, user=Depends(require_permission("docum
 
 
 @router.post("/documents/{document_id}", status_code=201)
-async def add_signature(document_id: str, request: Request,
-                        user=Depends(require_permission("documents.sign")), db=Depends(get_db)):
+async def add_signature(document_id: str, request: Request,user=Depends(require_permission("documents.sign")), db=Depends(get_db)):
+
     document_id = parse_uuid(document_id, "document_id")
     body = await read_json_object(request)
+
     signing_key_id = parse_uuid(body.get("signing_key_id"), "signing_key_id")
     signature_base64 = body.get("signature_base64")
+
     if not isinstance(signature_base64, str) or not 1 <= len(signature_base64) <= 1024:
-        raise ApiError(400, "signature_base64 must be a string of 1–1024 characters")
+        raise ApiError(400, "signature_base64 must be a string of 1-1024 characters")
+    
     document = await authorized_document(db, document_id, user, owner_only=True)
+
     # Serializes submissions for the same key and blocks concurrent key revocation.
     result = await db.execute(text("""
         SELECT * FROM crypto_keys WHERE id = :id AND owner_id = :owner
             AND purpose = 'SIGNING' AND algorithm = :algorithm
         FOR UPDATE
     """), {"id": signing_key_id, "owner": user["id"], "algorithm": ALGORITHM})
+
     key = result.mappings().first()
     if key is None:
         raise ApiError(404, "Your signing key was not found")
+    
     available = await db.execute(text("""
         SELECT status = 'ACTIVE' AND revoked_at IS NULL
           AND (expires_at IS NULL OR expires_at > clock_timestamp())
         FROM crypto_keys WHERE id = :id
     """), {"id": key["id"]})
+
     if not available.scalar_one():
         raise ApiError(409, "Signing key is inactive, expired, or revoked")
     try:
         signature = decode_signature(signature_base64)
     except ValueError as error:
         raise ApiError(400, str(error)) from error
+    
     plaintext = await plaintext_for(db, document)
+
     try:
         valid = await run_in_threadpool(verify_signature, key["public_key_pem"], signature, plaintext)
+
+
     except (ValueError, TypeError, IndexError) as error:
         raise ApiError(503, "Registered signing public key is invalid") from error
     if not valid:
         raise ApiError(400, "Signature does not match the stored document and registered public key")
+    
+
     existing = await db.execute(text("""
         SELECT id FROM document_signatures WHERE document_id = :document AND signing_key_id = :key
     """), {"document": document_id, "key": key["id"]})
+
+
     if existing.first() is not None:
         raise ApiError(409, "This key already signed this document")
+    
+
     # Check expiry again after crypto work; insert only while key is still usable.
     result = await db.execute(text("""
         INSERT INTO document_signatures
@@ -219,12 +236,16 @@ async def add_signature(document_id: str, request: Request,
     """), {"document": document_id, "signer": user["id"], "key": key["id"],
            "signature": signature, "algorithm": ALGORITHM, "hash": SHA256.new(plaintext).hexdigest()})
     row = result.mappings().first()
+
+
     if row is None:
         raise ApiError(409, "Signing key expired while verifying")
+    
+
     await audit(db, user, "documents.sign", document_id, {"signature_id": str(row["id"])})
     await db.commit()
-    return ApiResponse(201, {"id": str(row["id"]), "document_id": str(document_id),
-                             "signing_key_id": str(key["id"]), "signed_at": row["signed_at"].isoformat()},
+
+    return ApiResponse(201, {"id": str(row["id"]), "document_id": str(document_id),"signing_key_id": str(key["id"]), "signed_at": row["signed_at"].isoformat()},
                        "Signature verified and saved")
 
 
