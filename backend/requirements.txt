@@ -11,4 +11,8 @@ PyJWT
 argon2-cffi
 python-multipart
 pytest
+pytest-asyncio
 httpx
+bcrypt
+olefile
+pycryptodomex
