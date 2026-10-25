@@ -1,13 +1,14 @@
 from fastapi import Depends
 from sqlalchemy import text
 from app.database import get_db
-from app.utils import ApiError
+from app.utils.ApiError import ApiError
 from app.auth.router import verify_jwt
 
 
-def require_permission(permission: str):
-  async def check_permission(user=Depends(verify_jwt),db=Depends(get_db)):
+def require_permission(*permissions: str):
+  async def check_permission(user=Depends(verify_jwt), db=Depends(get_db)):
     user_id = user["id"]
+    perms_list = list(permissions)
     result = await db.execute(
         text("""
             SELECT EXISTS (
@@ -19,12 +20,12 @@ def require_permission(permission: str):
                     ON p.id = rp.permission_id
                 WHERE u.id = :user_id
                   AND u.is_active = TRUE
-                  AND p.name = :permission
+                  AND p.name = ANY(:permissions)
             )
         """),
         {
             "user_id": user_id,
-            "permission": permission,
+            "permissions": perms_list,
         },
     )
 
