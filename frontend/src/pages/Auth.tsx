@@ -1,13 +1,21 @@
+
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, ShieldCheck, ArrowRight } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  ArrowRight,
+  LogOut,
+} from "lucide-react";
 import { auth, errorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { Alert, Spinner } from "../components/UI";
 
 export default function Auth({ register = false }: { register?: boolean }) {
   const { user, setUser } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(2);
@@ -15,23 +23,43 @@ export default function Auth({ register = false }: { register?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
   const navigate = useNavigate();
-  if (user) return <Navigate to="/workspace/dashboard" replace />;
-  async function submit(event: FormEvent) {
+
+  async function handleSignOut() {
+    setError("");
+    setNotice("");
+
+    try {
+      await auth.logout();
+    } catch {
+      setError("Sign-out request failed. Please try again.");
+      return;
+    }
+
+    setUser(null);
+    setPassword("");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError("");
     setNotice("");
+
     try {
-      if (new TextEncoder().encode(password).length > 72)
+      if (new TextEncoder().encode(password).length > 72) {
         throw new Error("Password must not exceed 72 UTF-8 bytes.");
+      }
+
       if (register) {
         await auth.register(email, password, role);
         setPassword("");
         setNotice("Account created. You can now sign in.");
         navigate("/login");
       } else {
-        setUser(await auth.login(email, password));
+        const loggedInUser = await auth.login(email, password);
+        setUser(loggedInUser);
         navigate("/workspace/dashboard");
       }
     } catch (e) {
@@ -40,6 +68,7 @@ export default function Auth({ register = false }: { register?: boolean }) {
       setBusy(false);
     }
   }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 px-4 py-12">
       <div className="w-full max-w-md">
@@ -52,6 +81,7 @@ export default function Auth({ register = false }: { register?: boolean }) {
           </span>
           Securitas
         </Link>
+
         <form
           onSubmit={submit}
           className="space-y-5 rounded-2xl border border-blue-100 bg-white p-8 shadow-xl"
@@ -63,11 +93,45 @@ export default function Auth({ register = false }: { register?: boolean }) {
             <p className="mt-2 text-sm text-slate-500">
               {register
                 ? "Your secure document workspace starts here."
-                : "Sign in to your secure document workspace."}
+                : "Sign in to access your secure document workspace."}
             </p>
           </div>
+
+          {user && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 text-xs text-blue-900">
+              <p className="font-semibold text-slate-800">
+                You are currently signed in as:
+              </p>
+              <p className="mt-1 truncate font-bold text-blue-700">
+                {user.email}{" "}
+                <span className="font-semibold text-slate-600">
+                  ({user.role})
+                </span>
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Link
+                  to="/workspace/dashboard"
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white shadow-sm hover:bg-blue-700"
+                >
+                  Continue to Workspace
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                >
+                  <LogOut size={13} />
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
+
           <Alert message={error} />
           <Alert message={notice} success />
+
           <label className="field-label">
             Email address
             <input
@@ -80,13 +144,16 @@ export default function Auth({ register = false }: { register?: boolean }) {
               onChange={(e) => setEmail(e.target.value)}
             />
           </label>
+
           <label className="field-label">
             Password
             <div className="relative">
               <input
                 className="input-style pr-12"
                 type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
+                placeholder={
+                  register ? "Create a password" : "Enter your password"
+                }
                 autoComplete={register ? "new-password" : "current-password"}
                 required
                 value={password}
@@ -102,9 +169,10 @@ export default function Auth({ register = false }: { register?: boolean }) {
               </button>
             </div>
           </label>
+
           {register && (
             <label className="field-label">
-              Workspace role
+              Select Workspace Role
               <select
                 className="input-style"
                 value={role}
@@ -112,15 +180,29 @@ export default function Auth({ register = false }: { register?: boolean }) {
               >
                 <option value={2}>Document Owner</option>
                 <option value={3}>Employee</option>
+                <option value={4}>Security Auditor</option>
+                <option value={1}>Administrator</option>
               </select>
             </label>
           )}
-          <button disabled={busy} className="btn-primary w-full">
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="btn-primary w-full"
+          >
             {busy ? <Spinner /> : <ArrowRight size={17} />}
-            {busy ? "Please wait…" : register ? "Create account" : "Sign in"}
+            {busy
+              ? "Please wait…"
+              : register
+                ? "Create account"
+                : "Sign in"}
           </button>
+
           <p className="text-center text-sm text-slate-500">
-            {register ? "Already have an account?" : "Don't have an account?"}{" "}
+            {register
+              ? "Already have an account?"
+              : "Don't have an account?"}{" "}
             <Link
               to={register ? "/login" : "/register"}
               onClick={() => {
@@ -128,12 +210,13 @@ export default function Auth({ register = false }: { register?: boolean }) {
                 setNotice("");
                 setPassword("");
               }}
-              className="font-medium text-blue-600 hover:text-blue-700"
+              className="font-medium text-blue-600 underline hover:text-blue-700"
             >
-              {register ? "Sign in" : "Register"}
+              {register ? "Sign in" : "Sign up"}
             </Link>
           </p>
         </form>
+
         <p className="mt-5 text-center text-xs text-slate-400">
           Securitas · Secure document management
         </p>

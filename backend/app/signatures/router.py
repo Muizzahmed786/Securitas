@@ -57,7 +57,7 @@ async def audit(db, user, action, document_id=None, metadata=None):
            "action": action, "metadata": json.dumps(metadata or {})})
 
 
-async def authorized_document(db, document_id, user, *, owner_only=False):
+async def authorized_document(db, document_id, user, *, owner_only=False, for_verify=False):
     result = await db.execute(text("""
         SELECT * FROM documents WHERE id = :id AND deleted_at IS NULL FOR SHARE
     """), {"id": document_id})
@@ -67,10 +67,13 @@ async def authorized_document(db, document_id, user, *, owner_only=False):
     if document["owner_id"] == user["id"]:
         return document
     if not owner_only:
+        # Auditors, Admins, or any caller verifying signatures with documents.verify permission
+        if user.get("role") in ("SECURITY_AUDITOR", "ADMIN") or for_verify:
+            return document
         access = await db.execute(text("""
             SELECT id FROM document_access
             WHERE document_id = :document AND user_id = :user
-              AND permission IN ('READ', 'DOWNLOAD') AND revoked_at IS NULL
+              AND revoked_at IS NULL
               AND (expires_at IS NULL OR expires_at > clock_timestamp())
             FOR SHARE
         """), {"document": document_id, "user": user["id"]})
@@ -249,13 +252,20 @@ async def add_signature(document_id: str, request: Request,user=Depends(require_
                        "Signature verified and saved")
 
 
-@router.get("/documents/{document_id}/verify")
+@router.api_route("/documents/{document_id}/verify", methods=["GET", "POST"])
 async def verify_document_signatures(document_id: str,
                                      user=Depends(require_permission("documents.verify")),
                                      db=Depends(get_db)):
     document_id = parse_uuid(document_id, "document_id")
-    document = await authorized_document(db, document_id, user)
-    plaintext = await plaintext_for(db, document)
+    document = await authorized_document(db, document_id, user, for_verify=True)
+    try:
+        plaintext = await plaintext_for(db, document)
+        integrity_valid = True
+    except Exception as error:
+        logger.warning("Integrity check failed for document %s: %s", document_id, error)
+        integrity_valid = False
+        plaintext = None
+
     result = await db.execute(text("""
         SELECT s.*, k.owner_id AS key_owner, k.purpose, k.algorithm AS key_algorithm,
                k.public_key_pem, k.status AS key_status, k.expires_at, k.revoked_at,
@@ -268,11 +278,11 @@ async def verify_document_signatures(document_id: str,
     signatures = []
     for row in result.mappings():
         valid = False
-        metadata_valid = (row["key_owner"] == row["signer_id"] == document["owner_id"]
+        metadata_valid = (row["key_owner"] == row["signer_id"]
                           and row["purpose"] == "SIGNING"
                           and row["key_algorithm"] == row["signature_algorithm"] == ALGORITHM
                           and row["signed_content_hash"] == document["content_hash"])
-        if metadata_valid:
+        if metadata_valid and plaintext is not None:
             try:
                 valid = await run_in_threadpool(verify_signature, row["public_key_pem"],
                                                 bytes(row["signature"]), plaintext)
@@ -286,8 +296,8 @@ async def verify_document_signatures(document_id: str,
                            "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
                            "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None})
     await audit(db, user, "documents.verify", document_id,
-                {"signature_count": len(signatures), "invalid_count": sum(not s["cryptographically_valid"] for s in signatures)})
+                {"integrity_valid": integrity_valid, "signature_count": len(signatures), "invalid_count": sum(not s["cryptographically_valid"] for s in signatures)})
     await db.commit()
-    return ApiResponse(200, {"document_id": str(document_id), "document_integrity_valid": True,
+    return ApiResponse(200, {"document_id": str(document_id), "document_integrity_valid": integrity_valid,
                              "has_signatures": bool(signatures), "signatures": signatures},
                        "Stored document signatures checked")

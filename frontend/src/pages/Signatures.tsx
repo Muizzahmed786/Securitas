@@ -1,8 +1,19 @@
+
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { signatures, errorMessage, saveBlob } from "../api/client";
-import type { SigningKey, Verification } from "../api/client";
+import {
+  signatures,
+  documents,
+  errorMessage,
+  saveBlob,
+} from "../api/client";
+import type {
+  SigningKey,
+  Verification,
+  DocumentItem,
+} from "../api/client";
+
 import { signLocally } from "../api/signing";
 import { useAuth } from "../context/AuthContext";
 
@@ -21,6 +32,7 @@ export default function Signatures() {
 
   const [keys, setKeys] = useState<SigningKey[]>([]);
   const [loadingKeys, setLoadingKeys] = useState(false);
+  const [accessibleDocs, setAccessibleDocs] = useState<DocumentItem[]>([]);
 
   const [documentId, setDocumentId] = useState("");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
@@ -32,6 +44,23 @@ export default function Signatures() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    documents
+      .list()
+      .then((data) => {
+        if (active) setAccessibleDocs(data);
+      })
+      .catch(() => {
+        // Document selection remains optional; manual UUID entry is available.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!canSign) return;
@@ -66,7 +95,7 @@ export default function Signatures() {
     start("generate");
 
     try {
-      // Blank passphrase creates a PEM usable by our browser helper.
+      // The private PEM is downloaded to the user's device.
       const response = await signatures.generate("");
 
       const id = String(
@@ -75,16 +104,14 @@ export default function Signatures() {
 
       saveBlob(
         response.data,
-        validUUID(id)
-          ? `signing-${id}.pem`
-          : "signing-private-key.pem",
+        validUUID(id) ? `signing-${id}.pem` : "signing-private-key.pem",
       );
 
       setMessage(
         "Key created. Save the downloaded private PEM—you will need it to sign.",
       );
 
-      // Refresh separately: failure here does not mean generation failed.
+      // Refresh separately so a refresh failure doesn't misreport key creation.
       try {
         setKeys(await signatures.keys());
       } catch {
@@ -116,7 +143,7 @@ export default function Signatures() {
         throw new Error("Choose the original document and private-key PEM.");
       }
 
-      // Fetch current keys so newly created or revoked keys are accounted for.
+      // Refresh key state before attempting a signature.
       const currentKeys = await signatures.keys();
       setKeys(currentKeys);
 
@@ -130,7 +157,6 @@ export default function Signatures() {
         throw new Error("Create an active signing key first.");
       }
 
-      // Try the ID in the downloaded filename first, when available.
       const filenameId = privateKeyFile.name.match(
         /^signing-([0-9a-f-]{36})\.pem$/i,
       )?.[1];
@@ -154,8 +180,6 @@ export default function Signatures() {
           matchedKeyId = key.id;
           break;
         } catch (error) {
-          // The existing helper gives this error for a different public key.
-          // Other errors, such as an invalid/encrypted PEM, should stop signing.
           const mismatch =
             error instanceof Error &&
             error.message.startsWith(
@@ -193,6 +217,7 @@ export default function Signatures() {
 
   async function verifyDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
     start("verify");
     setResult(null);
 
@@ -223,6 +248,12 @@ export default function Signatures() {
       <Alert message={message} success />
 
       <datalist id="uploaded-documents">
+        {accessibleDocs.map((doc) => (
+          <option key={doc.id} value={doc.id}>
+            {doc.filename}
+          </option>
+        ))}
+
         {receipts.map((receipt) => (
           <option key={receipt.id} value={receipt.id}>
             {receipt.filename}
@@ -260,16 +291,42 @@ export default function Signatures() {
                 disabled={Boolean(busy)}
                 className="mt-4 max-w-2xl space-y-4"
               >
+                {accessibleDocs.length > 0 && (
+                  <div>
+                    <label className="field-label">
+                      Choose Document to Sign
+                    </label>
+
+                    <select
+                      className="input-style mt-1.5"
+                      value={documentId}
+                      onChange={(event) => setDocumentId(event.target.value)}
+                    >
+                      <option value="">
+                        -- Select from your documents ({accessibleDocs.length}) --
+                      </option>
+
+                      {accessibleDocs.map((doc) => (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.filename} — ID: {doc.id}
+                        </option>
+                      ))}
+                    </select>
+
+                    <p className="mt-1 text-xs text-slate-400">
+                      Or type/paste the document ID below.
+                    </p>
+                  </div>
+                )}
+
                 <label className="field-label">
-                  Uploaded document
+                  Document ID (UUID)
                   <input
                     className="input-style"
                     list="uploaded-documents"
                     placeholder="Choose or paste the document ID"
                     value={documentId}
-                    onChange={(event) =>
-                      setDocumentId(event.target.value)
-                    }
+                    onChange={(event) => setDocumentId(event.target.value)}
                     required
                   />
                 </label>
@@ -301,7 +358,7 @@ export default function Signatures() {
                 </label>
 
                 <p className="text-xs text-slate-500">
-                  Choose the exact file you uploaded. Signing happens
+                  Choose the exact original file you uploaded. Signing happens
                   in your browser; your private key is not uploaded.
                 </p>
 
@@ -335,8 +392,39 @@ export default function Signatures() {
               disabled={Boolean(busy)}
               className="mt-4 max-w-2xl space-y-4"
             >
+              {accessibleDocs.length > 0 && (
+                <div>
+                  <label className="field-label">
+                    Choose Document to Verify
+                  </label>
+
+                  <select
+                    className="input-style mt-1.5"
+                    value={verifyId}
+                    onChange={(event) => {
+                      setVerifyId(event.target.value);
+                      setResult(null);
+                    }}
+                  >
+                    <option value="">
+                      -- Select a document ({accessibleDocs.length} available) --
+                    </option>
+
+                    {accessibleDocs.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.filename} ({doc.classification}) — ID: {doc.id}
+                      </option>
+                    ))}
+                  </select>
+
+                  <p className="mt-1 text-xs text-slate-400">
+                    Or type/paste the document ID below.
+                  </p>
+                </div>
+              )}
+
               <label className="field-label">
-                Uploaded document
+                Document ID (UUID)
                 <input
                   className="input-style"
                   list="uploaded-documents"

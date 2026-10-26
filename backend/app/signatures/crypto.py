@@ -47,6 +47,9 @@ def verify_signature(public_pem, signature, data):
 
 
 def decrypt_document(document, wrapping_key, storage_root, passphrase=None):
+    if passphrase is None:
+        import os
+        passphrase = os.getenv("WRAPPING_PRIVATE_KEY_PASSPHRASE") or os.getenv("RSA_PRIVATE_KEY_PASSPHRASE") or None
     root = Path(storage_root).resolve()
     path = Path(document["storage_path"]).resolve()
     if not path.is_relative_to(root):

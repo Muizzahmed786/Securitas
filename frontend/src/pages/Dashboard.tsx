@@ -1,3 +1,4 @@
+
 import { Link } from "react-router-dom";
 import {
   ShieldCheck,
@@ -9,6 +10,8 @@ import {
   LockKeyhole,
   UserRound,
   CheckCircle2,
+  Share2,
+  Activity,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -18,8 +21,13 @@ import {
   formatDate,
   roleName,
 } from "../components/UI";
+
 export default function Dashboard() {
   const { user, permissions, receipts, can } = useAuth();
+
+  const isAuditor = user?.role === "SECURITY_AUDITOR";
+  const canUpload = can("documents.upload");
+
   const stats = [
     {
       label: "Your workspace",
@@ -36,11 +44,27 @@ export default function Dashboard() {
       sub: "Actions allowed by your role",
     },
     {
-      label: "Uploads this session",
-      value: receipts.length,
-      icon: FileText,
+      label: canUpload
+        ? "Uploads this session"
+        : isAuditor
+          ? "Audit Telemetry"
+          : "Access Status",
+      value: canUpload
+        ? receipts.length
+        : isAuditor
+          ? "Surveillance"
+          : "Active",
+      icon: canUpload
+        ? FileText
+        : isAuditor
+          ? Activity
+          : ShieldCheck,
       color: "bg-emerald-50 text-emerald-600",
-      sub: "Successful uploads since sign-in",
+      sub: canUpload
+        ? "Successful uploads since sign-in"
+        : isAuditor
+          ? "Security audit monitoring"
+          : "Document access and sharing",
     },
     {
       label: "Document encryption",
@@ -50,20 +74,35 @@ export default function Dashboard() {
       sub: "With RSA-protected document keys",
     },
   ];
+
   const actions = [
+    {
+      to: "/workspace/sharing",
+      label: "Documents & Secure Sharing",
+      desc: "Manage accessible documents, sharing permissions, and downloads.",
+      icon: Share2,
+      show: true,
+    },
     {
       to: "/workspace/upload",
       label: "Upload a document",
-      desc: "Protect a PDF or Word document with encrypted storage.",
+      desc: "Protect a PDF or Word document with AES-256-GCM encrypted storage.",
       icon: Upload,
-      show: can("documents.upload"),
+      show: canUpload,
     },
     {
       to: "/workspace/signatures",
       label: "Digital signatures",
-      desc: "Manage signing keys, sign documents, or check signatures.",
+      desc: "Manage signing keys, sign documents locally with RSA-PSS, or verify signatures.",
       icon: PenLine,
       show: can("documents.sign") || can("documents.verify"),
+    },
+    {
+      to: "/workspace/audit",
+      label: "Auditor Dashboard",
+      desc: "Review security telemetry, risk decisions, and audit events.",
+      icon: Activity,
+      show: can("audit.read"),
     },
     {
       to: "/workspace/keys",
@@ -73,6 +112,7 @@ export default function Dashboard() {
       show: can("crypto_keys.create"),
     },
   ].filter((action) => action.show);
+
   return (
     <>
       <PageHeading
@@ -80,6 +120,7 @@ export default function Dashboard() {
         title="Your secure workspace"
         description={`Welcome back${user?.email ? ", " + user.email : ""}. Manage document security from one place.`}
       />
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map(({ label, value, icon: Icon, color, sub }) => (
           <Card key={label}>
@@ -98,12 +139,14 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>
+
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <h2 className="section-heading">Quick actions</h2>
           <p className="mt-1 text-sm text-slate-400">
             Available for your account permissions.
           </p>
+
           <div className="mt-5 space-y-3">
             {actions.length ? (
               actions.map(({ to, label, desc, icon: Icon }) => (
@@ -137,6 +180,7 @@ export default function Dashboard() {
             )}
           </div>
         </Card>
+
         <Card>
           <span className="mb-4 inline-flex rounded-xl bg-indigo-50 p-3 text-indigo-600">
             <ShieldCheck size={24} />
@@ -144,7 +188,7 @@ export default function Dashboard() {
           <h2 className="section-heading">Protection at each step</h2>
           <p className="mt-3 text-sm leading-6 text-slate-500">
             Document contents are encrypted before persistent storage. RSA key
-            wrapping protects each file's encryption key.
+            wrapping protects each file&apos;s encryption key.
           </p>
           <div className="mt-5 space-y-3">
             {[
@@ -164,37 +208,95 @@ export default function Dashboard() {
           </div>
         </Card>
       </div>
-      <Card className="mt-6">
-        <h2 className="section-heading">Recent uploads this session</h2>
-        <p className="mt-1 text-xs text-slate-400">
-          Upload receipts are kept until you refresh or sign out.
-        </p>
-        {receipts.length ? (
-          <div className="mt-4 divide-y divide-slate-100">
-            {receipts.slice(0, 5).map((receipt) => (
-              <div key={receipt.id} className="flex items-center gap-3 py-4">
-                <FileText size={21} className="shrink-0 text-blue-500" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-700">
-                    {receipt.filename}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {formatDate(receipt.created_at)}
-                  </p>
+
+      {canUpload ? (
+        <Card className="mt-6">
+          <h2 className="section-heading">Recent uploads this session</h2>
+          <p className="mt-1 text-xs text-slate-400">
+            Upload receipts are kept until you refresh or sign out.
+          </p>
+
+          {receipts.length ? (
+            <div className="mt-4 divide-y divide-slate-100">
+              {receipts.slice(0, 5).map((receipt) => (
+                <div
+                  key={receipt.id}
+                  className="flex items-center gap-3 py-4"
+                >
+                  <FileText size={21} className="shrink-0 text-blue-500" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-700">
+                      {receipt.filename}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {formatDate(receipt.created_at)}
+                    </p>
+                  </div>
+                  <span className="ml-auto rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-semibold text-emerald-600">
+                    ENCRYPTED
+                  </span>
                 </div>
-                <span className="ml-auto rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-semibold text-emerald-600">
-                  ENCRYPTED
-                </span>
-              </div>
-            ))}
+              ))}
+            </div>
+          ) : (
+            <Empty
+              title="No uploads this session"
+              description="Your next successful upload will appear here."
+            />
+          )}
+        </Card>
+      ) : isAuditor ? (
+        <Card className="mt-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="section-heading flex items-center gap-2">
+                <Activity size={20} className="text-blue-600" />
+                Security Surveillance & Compliance
+              </h2>
+              <p className="mt-1 text-xs text-slate-400">
+                Inspect security metrics, risk decisions, and audit event logs.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {can("audit.read") && (
+                <Link to="/workspace/audit" className="btn-primary">
+                  Open Auditor Dashboard
+                </Link>
+              )}
+              {can("documents.verify") && (
+                <Link to="/workspace/signatures" className="btn-secondary">
+                  Verify Signatures
+                </Link>
+              )}
+            </div>
           </div>
-        ) : (
-          <Empty
-            title="No uploads this session"
-            description="Your next successful upload will appear here."
-          />
-        )}
-      </Card>
+        </Card>
+      ) : (
+        <Card className="mt-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="section-heading flex items-center gap-2">
+                <Share2 size={20} className="text-blue-600" />
+                Accessible Documents & Secure Sharing
+              </h2>
+              <p className="mt-1 text-xs text-slate-400">
+                View accessible documents, manage sharing, and use signature
+                verification where permitted.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link to="/workspace/sharing" className="btn-primary">
+                View Accessible Documents
+              </Link>
+              {can("documents.verify") && (
+                <Link to="/workspace/signatures" className="btn-secondary">
+                  Verify Signatures
+                </Link>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
     </>
   );
 }
