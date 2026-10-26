@@ -1,185 +1,450 @@
 
-}
+import axios, {
+  AxiosError,
+  type AxiosRequestConfig,
+} from "axios";
 
-export async function createWrappingKey() {
-  await prepareAction();
-  return (
-    await API.post<
-      Envelope<{
-        id: string;
-        algorithm: string;
-        public_key_pem: string;
-        created_at: string;
-      }>
-    >("/crypto-keys/wrapping")
-  ).data.data;
-}
+export const API = axios.create({
+  baseURL: "/api",
+  withCredentials: true,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+export type Envelope<T> = {
+  success?: boolean;
+  message?: string;
+  data: T;
+};
+
+export type User = {
+  id: number | string;
+  email: string;
+  role: string;
+  role_id?: number;
+  is_active?: boolean;
+  created_at?: string;
+};
+
+export type Permission = {
+  id?: number;
+  name: string;
+  description?: string;
+};
+
+export type UploadReceipt = {
+  id: string;
+  filename: string;
+  mime_type?: string;
+  file_size?: number;
+  classification?: string;
+  created_at?: string;
+};
+
+export type SigningKey = {
+  id: string;
+  algorithm: string;
+  public_key: string;
+  status: string;
+  usable_for_signing?: boolean;
+  created_at?: string;
+};
+
+export type Verification = {
+  valid?: boolean;
+  integrity_valid?: boolean;
+  signature_valid?: boolean;
+  message?: string;
+  details?: string;
+  document_id?: string;
+  signer_id?: string;
+  algorithm?: string;
+};
 
 export type DocumentItem = {
   id: string;
-  owner_id: number;
   filename: string;
-  mime_type: string;
-  file_size_bytes: number;
-  classification: string;
-  content_hash: string;
-  permission?: "OWNER" | "READ" | "DOWNLOAD";
-  access_permission?: "OWNER" | "READ" | "DOWNLOAD";
-  created_at: string;
+  mime_type?: string;
+  file_size?: number;
+  classification?: string;
+  owner_id?: string | number;
+  owner_email?: string;
+  created_at?: string;
+  updated_at?: string;
+  status?: string;
+  permissions?: string[];
+  can_view?: boolean;
+  can_download?: boolean;
+  can_share?: boolean;
 };
 
 export type DocumentShare = {
-  id: number;
+  id: string;
   document_id: string;
-  user_id: number;
-  user_email?: string;
-  permission: "READ" | "DOWNLOAD";
-  granted_by: number;
-  created_at: string;
-  expires_at: string | null;
-  revoked_at: string | null;
+  user_id?: string | number;
+  email?: string;
+  permission?: string;
+  permissions?: string[];
+  expires_at?: string | null;
+  revoked_at?: string | null;
+  created_at?: string;
 };
 
-export type StepUpChallengeError = {
-  step_up_required: boolean;
-  challenge_id: string;
-  risk_score: number;
-  risk_level: string;
-  reason: string;
-  challenge_otp?: string;
+export type StepUpChallengeError = Error & {
+  status?: number;
+  code?: string;
+  challenge_id?: string;
+  requires_step_up?: boolean;
+  details?: unknown;
 };
 
 export type AuditEvent = {
-  id: number;
-  request_id: string;
-  user_id: number | null;
-  user_email: string | null;
-  document_id: string | null;
-  risk_event_id: string | null;
-  action: string;
-  status: "SUCCESS" | "FAILURE" | "DENIED" | "CHALLENGED";
-  ip_address: string | null;
-  timestamp: string;
-  metadata: Record<string, any>;
+  id: string;
+  event_type?: string;
+  action?: string;
+  actor_id?: string | number;
+  actor_email?: string;
+  document_id?: string;
+  resource_type?: string;
+  resource_id?: string;
+  outcome?: string;
+  risk_score?: number;
+  ip_address?: string;
+  details?: Record<string, unknown>;
+  created_at?: string;
+  timestamp?: string;
 };
 
 export type AuditStats = {
-  total_audit_events: number;
-  status_breakdown: Record<string, number>;
-  action_breakdown: Record<string, number>;
-  risk_distribution: Record<string, number>;
-  integrity_failures: number;
+  total_events?: number;
+  successful_events?: number;
+  failed_events?: number;
+  blocked_events?: number;
+  high_risk_events?: number;
+  total_documents?: number;
+  active_shares?: number;
+  [key: string]: number | undefined;
 };
 
+type RetryableRequestConfig = AxiosRequestConfig & {
+  _retried?: boolean;
+};
+
+const unwrap = <T>(response: { data: unknown }): T => {
+  const body = response.data as Envelope<T> | T;
+
+  if (
+    body !== null &&
+    typeof body === "object" &&
+    "data" in body
+  ) {
+    return (body as Envelope<T>).data;
+  }
+
+  return body as T;
+};
+
+async function refreshSession(): Promise<void> {
+  await axios.post(
+    "/api/auth/refresh",
+    {},
+    { withCredentials: true },
+  );
+}
+
+// Retry failed GET requests once after attempting to refresh the session.
+// Do not automatically replay mutations.
+API.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const config = error.config as RetryableRequestConfig | undefined;
+
+    if (
+      error.response?.status === 401 &&
+      config &&
+      !config._retried &&
+      (config.method ?? "get").toLowerCase() === "get" &&
+      !config.url?.includes("/auth/")
+    ) {
+      config._retried = true;
+
+      try {
+        await refreshSession();
+        return API.request(config);
+      } catch {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("session-expired"));
+        }
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+
+export function errorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as
+      | {
+          detail?: string | { message?: string };
+          message?: string;
+          error?: string;
+          code?: string;
+          challenge_id?: string;
+          requires_step_up?: boolean;
+        }
+      | undefined;
+
+    if (data) {
+      const detail =
+        typeof data.detail === "string"
+          ? data.detail
+          : data.detail?.message;
+
+      const message =
+        detail ?? data.message ?? data.error;
+
+      if (message) {
+        const enriched = new Error(message) as StepUpChallengeError;
+
+        enriched.status = error.response?.status;
+        enriched.code = data.code;
+        enriched.challenge_id = data.challenge_id;
+        enriched.requires_step_up = data.requires_step_up;
+
+        return enriched.message;
+      }
+    }
+
+    return error.message || "A network request failed.";
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "An unexpected error occurred.";
+}
+
+// Use this before protected mutations when the backend requires
+// an action-preparation or step-up verification flow.
+export async function prepareAction(
+  action: string,
+  payload?: Record<string, unknown>,
+) {
+  const response = await API.post("/risk/evaluate", {
+    action,
+    ...payload,
+  });
+
+  return unwrap(response);
+}
+
+export const auth = {
+  async login(email: string, password: string): Promise<User> {
+    const response = await API.post("/auth/login", {
+      email,
+      password,
+    });
+
+    return unwrap<User>(response);
+  },
+
+  async register(
+    email: string,
+    password: string,
+    role_id: number,
+  ) {
+    const response = await API.post("/auth/register", {
+      email,
+      password,
+      role_id,
+    });
+
+    return unwrap(response);
+  },
+
+  async logout() {
+    return API.post("/auth/logout", {});
+  },
+
+  async current(): Promise<User> {
+    const response = await API.get("/auth/me");
+    return unwrap<User>(response);
+  },
+
+  async permissions(): Promise<Permission[]> {
+    const response = await API.get("/rbac/get-my-permissions");
+    const result = unwrap<{ permissions: Permission[] }>(response);
+    return result.permissions;
+  },
+};
+
+export const signatures = {
+  async keys(): Promise<SigningKey[]> {
+    const response = await API.get("/signatures/keys");
+    return unwrap<SigningKey[]>(response);
+  },
+
+  async generate(algorithm: string) {
+    const response = await API.post("/signatures/keys/generate", {
+      algorithm,
+    });
+
+    return response;
+  },
+
+  async revoke(keyId: string) {
+    return API.post(`/signatures/keys/${keyId}/revoke`, {});
+  },
+
+  async submit(payload: {
+    document_id: string;
+    signature: string;
+    algorithm: string;
+    key_id?: string;
+  }) {
+    return API.post("/signatures/submit", payload);
+  },
+
+  async verify(payload: {
+    document_id: string;
+    signature?: string;
+    key_id?: string;
+  }): Promise<Verification> {
+    const response = await API.post("/signatures/verify", payload);
+    return unwrap<Verification>(response);
+  },
+};
+
+export async function uploadDocument(
+  file: File,
+  classification?: string,
+): Promise<UploadReceipt> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  if (classification) {
+    formData.append("classification", classification);
+  }
+
+  const response = await API.post("/documents/upload", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+
+  return unwrap<UploadReceipt>(response);
+}
+
+export async function createWrappingKey() {
+  await prepareAction("crypto_keys.create");
+
+  const response = await API.post("/crypto-keys/wrapping", {});
+
+  return unwrap<{
+    id: string;
+    algorithm: string;
+    public_key_pem: string;
+    created_at?: string;
+  }>(response);
+}
+
 export const documents = {
-  list: async () =>
-    (await API.get<Envelope<DocumentItem[]>>("/documents/")).data.data,
-
-  get: async (id: string) =>
-    (await API.get<Envelope<DocumentItem>>(`/documents/${id}`)).data.data,
-
-  view: async (id: string, stepUpToken?: string) => {
-    const headers: Record<string, string> = {};
-    if (stepUpToken) {
-      headers["X-Step-Up-Token"] = stepUpToken;
-    }
-    return await API.get(`/documents/${id}/view`, {
-      responseType: "blob",
-      headers,
-    });
+  async list(): Promise<DocumentItem[]> {
+    const response = await API.get("/documents/");
+    return unwrap<DocumentItem[]>(response);
   },
 
-  download: async (id: string, stepUpToken?: string) => {
-    const headers: Record<string, string> = {};
-    if (stepUpToken) {
-      headers["X-Step-Up-Token"] = stepUpToken;
-    }
-    return await API.get(`/documents/${id}/download`, {
-      responseType: "blob",
-      headers,
-    });
+  async get(id: string): Promise<DocumentItem> {
+    const response = await API.get(`/documents/${id}`);
+    return unwrap<DocumentItem>(response);
   },
 
-  downloadEncrypted: async (id: string) => {
-    return await API.get(`/documents/${id}/encrypted`, {
+  async view(id: string) {
+    return API.get(`/documents/${id}/view`, {
       responseType: "blob",
     });
   },
 
-  shares: async (id: string) =>
-    (await API.get<Envelope<DocumentShare[]>>(`/documents/${id}/shares`))
-      .data.data,
+  async download(id: string) {
+    return API.get(`/documents/${id}/download`, {
+      responseType: "blob",
+    });
+  },
 
-  share: async (
+  async downloadEncrypted(id: string) {
+    return API.get(`/documents/${id}/encrypted`, {
+      responseType: "blob",
+    });
+  },
+
+  async shares(id: string): Promise<DocumentShare[]> {
+    const response = await API.get(`/documents/${id}/shares`);
+    return unwrap<DocumentShare[]>(response);
+  },
+
+  async share(
     id: string,
-    recipient_email: string,
-    permission: "READ" | "DOWNLOAD",
-    expires_at?: string | null,
-  ) => {
-    await prepareAction();
-    return (
-      await API.post<Envelope<DocumentShare>>(`/documents/${id}/share`, {
-        recipient_email,
-        permission,
-        expires_at: expires_at || null,
-      })
-    ).data.data;
+    payload: {
+      email: string;
+      permission?: string;
+      permissions?: string[];
+      expires_at?: string | null;
+    },
+  ) {
+    return API.post(`/documents/${id}/share`, payload);
   },
 
-  revoke: async (id: string, target_user_id: number) => {
-    await prepareAction();
-    return (
-      await API.post<Envelope<{ access_id: number; revoked: boolean }>>(
-        `/documents/${id}/revoke`,
-        { recipient_id: target_user_id },
-      )
-    ).data.data;
+  async revoke(id: string, shareId: string) {
+    return API.post(`/documents/${id}/revoke`, {
+      share_id: shareId,
+    });
   },
 };
 
 export const risk = {
-  evaluate: async (
-    action: string,
-    classification: string,
-    document_id?: string,
-  ) => {
-    return (
-      await API.post<Envelope<any>>("/risk/evaluate", {
-        action,
-        classification,
-        document_id,
-      })
-    ).data.data;
+  async evaluate(payload: Record<string, unknown>) {
+    const response = await API.post("/risk/evaluate", payload);
+    return unwrap(response);
   },
 
-  verifyStepUp: async (challenge_id: string, otp: string) => {
-    return (
-      await API.post<
-        Envelope<{
-          step_up_token: string;
-          challenge_id: string;
-          status: string;
-        }>
-      >("/risk/step-up/verify", {
-        challenge_id,
-        otp,
-      })
-    ).data.data;
+  async verifyStepUp(payload: Record<string, unknown>) {
+    const response = await API.post(
+      "/risk/step-up/verify",
+      payload,
+    );
+
+    return unwrap(response);
   },
 };
 
 export const audit = {
-  stats: async () =>
-    (await API.get<Envelope<AuditStats>>("/audit/stats")).data.data,
+  async stats(): Promise<AuditStats> {
+    const response = await API.get("/audit/stats");
+    return unwrap<AuditStats>(response);
+  },
 
-  events: async (params?: {
-    action?: string;
-    status?: string;
-    user_id?: number;
-    limit?: number;
-  }) => {
-    return (
-      await API.get<Envelope<AuditEvent[]>>("/audit/events", { params })
-    ).data.data;
+  async events(params?: Record<string, unknown>): Promise<AuditEvent[]> {
+    const response = await API.get("/audit/events", { params });
+    return unwrap<AuditEvent[]>(response);
   },
 };
+
+export function saveBlob(
+  blob: Blob,
+  filename: string,
+): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  URL.revokeObjectURL(url);
+}

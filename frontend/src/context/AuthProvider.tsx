@@ -18,17 +18,22 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     setReceipts([]);
   }, []);
   const reloadPermissions = useCallback(async () => {
-    setPermissionsLoading(true);
-    try {
-      setPermissions(await auth.permissions());
-      setPermissionError("");
-    } catch (error) {
-      setPermissions([]);
-      setPermissionError(errorMessage(error));
-    } finally {
-      setPermissionsLoading(false);
-    }
-  }, []);
+  if (!user) {
+    setPermissions([]);
+    return;
+  }
+
+  setPermissionsLoading(true);
+  try {
+    setPermissions(await auth.permissions());
+    setPermissionError("");
+  } catch (error) {
+    setPermissions([]);
+    setPermissionError(errorMessage(error));
+  } finally {
+    setPermissionsLoading(false);
+  }
+}, [user]);
   useEffect(() => {
     let active = true;
     auth
