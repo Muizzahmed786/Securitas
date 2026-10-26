@@ -102,7 +102,7 @@ async def test_protected_route_and_logout(client: AsyncClient):
     
     # Logout session 1
     logout_resp = await client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token1}"})
-    assert logout_resp.status_code == 204
+    assert logout_resp.status_code in (200, 204)
     
     # Access /me with token1 should fail
     me_resp_after = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token1}"})

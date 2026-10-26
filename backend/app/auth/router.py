@@ -7,21 +7,27 @@ from fastapi import Depends, APIRouter, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from app.utils.ApiError import ApiError
 from app.utils.ApiResponse import ApiResponse
-from app.config import *
+from app.config import (
+    ACCESS_TOKEN_SECRET,
+    REFRESH_TOKEN_SECRET,
+    ACCESS_TOKEN_SECONDS,
+    REFRESH_TOKEN_SECONDS,
+    COOKIE_SECURE,
+)
 from app.database import get_db
-from app.utils.FormatRequest import *
+from app.utils.FormatRequest import read_body, required_string
 
 router = APIRouter()
 
 
-def hash_password(password):
+def hash_password(password: str) -> str:
     password_bytes = password.encode("utf-8")
     if len(password_bytes) > 72:
         raise ApiError(400, "Password must not exceed 72 UTF-8 bytes")
     return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
 
 
-def is_password_correct(password, password_hash):
+def is_password_correct(password: str, password_hash: str) -> bool:
     password_bytes = password.encode("utf-8")
     if len(password_bytes) > 72:
         return False
@@ -30,18 +36,23 @@ def is_password_correct(password, password_hash):
 
 def generate_tokens(user_id):
     now = datetime.now(timezone.utc)
+    access_jti = str(uuid.uuid4())
     access_payload = {
         "id": str(user_id),
+        "sub": str(user_id),
         "type": "access",
         "iat": now,
-        "exp": now + timedelta(seconds=ACCESS_TOKEN_SECONDS)
+        "exp": now + timedelta(seconds=ACCESS_TOKEN_SECONDS),
+        "jti": access_jti,
     }
+    refresh_jti = str(uuid.uuid4())
     refresh_payload = {
         "id": str(user_id),
+        "sub": str(user_id),
         "type": "refresh",
         "iat": now,
         "exp": now + timedelta(seconds=REFRESH_TOKEN_SECONDS),
-        "jti": str(uuid.uuid4())
+        "jti": refresh_jti,
     }
     access_token = jwt.encode(
         access_payload, ACCESS_TOKEN_SECRET, algorithm="HS256"
@@ -49,7 +60,7 @@ def generate_tokens(user_id):
     refresh_token = jwt.encode(
         refresh_payload, REFRESH_TOKEN_SECRET, algorithm="HS256"
     )
-    return access_token, refresh_token
+    return access_token, refresh_token, access_jti, refresh_jti
 
 
 def verify_token(token, secret, expected_type):
@@ -58,29 +69,37 @@ def verify_token(token, secret, expected_type):
             token,
             secret,
             algorithms=["HS256"],
-            options={"require": ["id", "type", "exp"]}
+            options={"require": ["id", "type", "exp"]},
         )
     except jwt.ExpiredSignatureError:
         raise ApiError(401, "Token has expired")
     except jwt.InvalidTokenError:
         raise ApiError(401, "Invalid token")
-    if payload["type"] != expected_type:
+    if payload.get("type") != expected_type:
         raise ApiError(401, "Invalid token type")
-    if not isinstance(payload["id"], str):
+    if not isinstance(payload.get("id"), str):
         raise ApiError(401, "Invalid token user ID")
     return payload
 
 
-def set_auth_cookies(response, access_token, refresh_token):
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
     response.set_cookie(
-        key="accessToken", value=access_token,
-        httponly=True, secure=COOKIE_SECURE, samesite="lax",
-        path="/", max_age=ACCESS_TOKEN_SECONDS
+        key="accessToken",
+        value=access_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+        max_age=ACCESS_TOKEN_SECONDS,
     )
     response.set_cookie(
-        key="refreshToken", value=refresh_token,
-        httponly=True, secure=COOKIE_SECURE, samesite="lax",
-        path="/", max_age=REFRESH_TOKEN_SECONDS
+        key="refreshToken",
+        value=refresh_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+        max_age=REFRESH_TOKEN_SECONDS,
     )
 
 
@@ -93,7 +112,7 @@ async def find_user(db, user_id):
         JOIN roles AS r ON r.id = u.role_id
         WHERE u.id::text = :user_id
         """),
-        {"user_id": str(user_id)}
+        {"user_id": str(user_id)},
     )
     user = result.mappings().first()
     if user is None:
@@ -104,34 +123,66 @@ async def find_user(db, user_id):
 
 
 async def verify_jwt(request: Request, db=Depends(get_db)):
-    token = request.cookies.get("accessToken")
+    token = None
+    authorization = request.headers.get("Authorization", "")
+    parts = authorization.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        token = parts[1]
     if not token:
-        authorization = request.headers.get("Authorization", "")
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
+        token = request.cookies.get("accessToken")
     if not token:
         raise ApiError(401, "Unauthorized request")
+
     payload = verify_token(token, ACCESS_TOKEN_SECRET, "access")
-    return await find_user(db, payload["id"])
+    user = await find_user(db, payload["id"])
+
+    # Enforce session validation if jti is present
+    jti = payload.get("jti")
+    if jti:
+        session_res = await db.execute(
+            text("""
+                SELECT id, revoked_at, expires_at
+                FROM auth_sessions
+                WHERE jwt_jti = :jti AND user_id = :user_id
+            """),
+            {"jti": jti, "user_id": user["id"]},
+        )
+        sess = session_res.mappings().first()
+        if sess is not None:
+            if sess["revoked_at"] is not None:
+                raise ApiError(401, "Session has been revoked")
+            user["session_id"] = str(sess["id"])
+            user["jwt_jti"] = jti
+
+    return user
 
 
 @router.post("/register", status_code=201)
 async def register(request: Request, db=Depends(get_db)):
     body = await read_body(request)
     email = required_string(body, "email").strip().lower()
-    password = required_string(body, "password")
-    role_id = int(body.get("role_id"))
+    password = body.get("password")
 
-    if role_id not in [1, 2, 3, 4]:
-        raise ApiError(400, "role_id must be an integer: 1, 2, 3, or 4")
+    if not isinstance(password, str) or len(password) < 8 or password.strip() == "":
+        raise ApiError(422, "Password must be at least 8 characters long")
+
+    raw_role_id = body.get("role_id")
+    if raw_role_id is None:
+        role_id = 3  # Default role is EMPLOYEE
+    else:
+        try:
+            role_id = int(raw_role_id)
+        except (ValueError, TypeError):
+            raise ApiError(400, "role_id must be an integer: 1, 2, 3, or 4")
+        if role_id not in [1, 2, 3, 4]:
+            raise ApiError(400, "role_id must be an integer: 1, 2, 3, or 4")
 
     if "is_active" in body:
         raise ApiError(400, "Account status cannot be set at registration")
 
     role_result = await db.execute(
         text("SELECT id, name FROM roles WHERE id = :role_id"),
-        {"role_id": role_id}
+        {"role_id": role_id},
     )
     role = role_result.mappings().first()
     if role is None:
@@ -139,7 +190,7 @@ async def register(request: Request, db=Depends(get_db)):
 
     user_result = await db.execute(
         text("SELECT id FROM users WHERE email = :email"),
-        {"email": email}
+        {"email": email},
     )
     existing_user = user_result.mappings().first()
     if existing_user is not None:
@@ -155,7 +206,7 @@ async def register(request: Request, db=Depends(get_db)):
             VALUES (:email, :password_hash, :role_id, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id, email, role_id, is_active, created_at, updated_at
             """),
-            {"email": email, "password_hash": password_hash, "role_id": role["id"]}
+            {"email": email, "password_hash": password_hash, "role_id": role["id"]},
         )
         await db.commit()
         created_user = created_user_result.mappings().first()
@@ -173,45 +224,116 @@ async def register(request: Request, db=Depends(get_db)):
 @router.post("/login")
 async def login(request: Request, response: Response, db=Depends(get_db)):
     body = await read_body(request)
-    email = required_string(body, "email").strip().lower()
-    password = required_string(body, "password")
+    email = (body.get("email") or body.get("username") or "").strip().lower()
+    if not email:
+        raise ApiError(400, "Email or username is required")
+    password = body.get("password") or ""
+    if not password:
+        raise ApiError(400, "Password is required")
+
     user_result = await db.execute(
         text("SELECT id, password_hash FROM users WHERE email = :email"),
-        {"email": email}
+        {"email": email},
     )
-    print(user_result)
     user = user_result.mappings().first()
     if user is None:
-        raise ApiError(401, "Invalid user credentials")
+        raise ApiError(401, "Invalid credentials")
+
     password_valid = await run_in_threadpool(
         is_password_correct, password, user["password_hash"]
     )
     if not password_valid:
-        raise ApiError(401, "Invalid user credentials")
+        raise ApiError(401, "Invalid credentials")
 
     logged_in_user = await find_user(db, str(user["id"]))
-    access_token, refresh_token = generate_tokens(user["id"])
+    access_token, refresh_token, access_jti, _ = generate_tokens(user["id"])
+
+    # Create server-side session tracking in auth_sessions
+    session_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=ACCESS_TOKEN_SECONDS)
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
+    await db.execute(
+        text("""
+            INSERT INTO auth_sessions (
+                id, user_id, jwt_jti, created_at, expires_at, ip_address, user_agent
+            )
+            VALUES (
+                :id, :user_id, :jwt_jti, :created_at, :expires_at, :ip_address, :user_agent
+            )
+        """),
+        {
+            "id": session_id,
+            "user_id": user["id"],
+            "jwt_jti": access_jti,
+            "created_at": now,
+            "expires_at": expires_at,
+            "ip_address": client_ip,
+            "user_agent": user_agent,
+        },
+    )
+    await db.commit()
+
     set_auth_cookies(response, access_token, refresh_token)
-    return ApiResponse(200, {
-        "user": logged_in_user,
-        "accessToken": access_token,
-        "refreshToken": refresh_token
-    }, "User logged in successfully")
+    return ApiResponse(
+        200,
+        {
+            "user": logged_in_user,
+            "accessToken": access_token,
+            "access_token": access_token,
+            "token_type": "bearer",
+            "refreshToken": refresh_token,
+            "session_id": str(session_id),
+        },
+        "User logged in successfully",
+    )
+
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response, db=Depends(get_db)):
+    token = None
+    authorization = request.headers.get("Authorization", "")
+    parts = authorization.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        token = parts[1]
+    if not token:
+        token = request.cookies.get("accessToken")
+
+    if token:
+        try:
+            payload = jwt.decode(
+                token,
+                ACCESS_TOKEN_SECRET,
+                algorithms=["HS256"],
+                options={"verify_exp": False},
+            )
+            jti = payload.get("jti")
+            if jti:
+                await db.execute(
+                    text("""
+                        UPDATE auth_sessions
+                        SET revoked_at = CURRENT_TIMESTAMP
+                        WHERE jwt_jti = :jti
+                    """),
+                    {"jti": jti},
+                )
+                await db.commit()
+        except Exception:
+            pass
+
     response.delete_cookie(
-        "accessToken", path="/", httponly=True,
-        secure=COOKIE_SECURE, samesite="lax"
+        "accessToken", path="/", httponly=True, secure=COOKIE_SECURE, samesite="lax"
     )
     response.delete_cookie(
-        "refreshToken", path="/", httponly=True,
-        secure=COOKIE_SECURE, samesite="lax"
+        "refreshToken", path="/", httponly=True, secure=COOKIE_SECURE, samesite="lax"
     )
-    return ApiResponse(200, {}, "Authentication cookies cleared")
+    return ApiResponse(200, {}, "Authentication cookies cleared and session revoked")
 
 
+@router.get("/me")
 @router.get("/get-current-user")
 async def get_current_user(user=Depends(verify_jwt)):
     return ApiResponse(200, user, "Current user fetched successfully")
@@ -228,13 +350,22 @@ async def refresh_access_token(
     payload = verify_token(refresh_token, REFRESH_TOKEN_SECRET, "refresh")
     user = await find_user(db, payload["id"])
 
-    access_token, unused_refresh_token = generate_tokens(user["id"])
+    access_token, new_refresh_token, access_jti, _ = generate_tokens(user["id"])
     response.set_cookie(
-        key="accessToken", value=access_token,
-        httponly=True, secure=COOKIE_SECURE, samesite="lax",
-        path="/", max_age=ACCESS_TOKEN_SECONDS
+        key="accessToken",
+        value=access_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+        max_age=ACCESS_TOKEN_SECONDS,
     )
-    return ApiResponse(200, {
-        "accessToken": access_token,
-        "refreshToken": refresh_token
-    }, "Access token refreshed")
+    return ApiResponse(
+        200,
+        {
+            "accessToken": access_token,
+            "access_token": access_token,
+            "refreshToken": refresh_token,
+        },
+        "Access token refreshed",
+    )
