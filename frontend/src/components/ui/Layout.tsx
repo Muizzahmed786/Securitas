@@ -16,8 +16,8 @@ import {
   Share2,
   Activity,
 } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
-import { auth, errorMessage } from "../api/client";
+import { useAuth } from "../../context/AuthContext";
+import { auth, errorMessage } from "../../api/client";
 import { Alert, roleName } from "./UI";
 
 export default function Layout() {

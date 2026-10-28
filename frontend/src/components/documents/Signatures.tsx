@@ -7,22 +7,16 @@ import {
   documents,
   errorMessage,
   saveBlob,
-} from "../api/client";
+} from "../../api/client";
 import type {
   SigningKey,
   Verification,
   DocumentItem,
-} from "../api/client";
+} from "../../api/client";
 
-import { signLocally } from "../api/signing";
-import { useAuth } from "../context/AuthContext";
+import { signLocally } from "../../api/signing";
+import { useAuth } from "../../context/AuthContext";
 
-import {
-  Alert,
-  Card,
-  PageHeading,
-  validUUID,
-} from "../components/UI";
 
 export default function Signatures() {
   const { can, receipts } = useAuth();

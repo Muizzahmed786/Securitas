@@ -1,15 +1,15 @@
 
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 
-import Layout from "../components/Layout";
+import Layout from "../components/ui/Layout";
 import Auth from "../pages/Auth";
-import Dashboard from "../pages/Dashboard";
+import Dashboard from "../components/admin/Dashboard";
 import Upload from "../pages/Upload";
-import Signatures from "../pages/Signatures";
+import Signatures from "../components/documents/Signatures";
 import Keys from "../pages/Keys";
-import Profile from "../pages/Profile";
+import Profile from "../components/admin/Profile";
 import Landing from "../pages/Landing";
-import Sharing from "../pages/Sharing";
+import Sharing from "../components/documents/Sharing";
 import Audit from "../pages/Audit";
 
 import ProtectedRoute from "./ProtectedRoute";

@@ -13,14 +13,14 @@ import {
   Share2,
   Activity,
 } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../../context/AuthContext";
 import {
   Card,
   PageHeading,
   Empty,
   formatDate,
   roleName,
-} from "../components/UI";
+} from "../ui/UI";
 
 export default function Dashboard() {
   const { user, permissions, receipts, can } = useAuth();

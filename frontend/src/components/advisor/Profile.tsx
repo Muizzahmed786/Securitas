@@ -1,12 +1,6 @@
 import { Mail, ShieldCheck, CalendarDays, UserRound } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
-import {
-  Card,
-  Empty,
-  PageHeading,
-  formatDate,
-  roleName,
-} from "../components/UI";
+import { useAuth } from "../../context/AuthContext";
+
 export default function Profile() {
   const { user, permissions } = useAuth();
   if (!user) return null;
