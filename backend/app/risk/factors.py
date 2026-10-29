@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from sqlalchemy import text
 from app.risk.schemas import RiskContext, FactorEvaluation
 

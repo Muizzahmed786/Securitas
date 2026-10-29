@@ -21,7 +21,7 @@ from app.database import get_db
 from app.rbac.dependency import require_permission
 from app.utils.ApiError import ApiError
 from app.utils.ApiResponse import ApiResponse
-from app.utils.FormatRequest import read_body
+from app.utils.FormatRequest import read_body, parse_uuid
 from app.signatures.crypto import decrypt_document, verify_signature
 from app.risk.schemas import RiskContext
 from app.risk.service import evaluate_risk, consume_step_up_token
@@ -57,13 +57,6 @@ MIME_TYPES = {
 }
 
 
-def parse_uuid(value, field):
-    if not isinstance(value, str):
-        raise ApiError(400, f"{field} must be a UUID string")
-    try:
-        return UUID(value)
-    except ValueError as error:
-        raise ApiError(400, f"{field} must be a valid UUID") from error
 
 
 async def read_upload(file: UploadFile) -> bytes:

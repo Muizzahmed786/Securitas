@@ -4,7 +4,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from Cryptodome.PublicKey import RSA
-from dotenv import load_dotenv
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text

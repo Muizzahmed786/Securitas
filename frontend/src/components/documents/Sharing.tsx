@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { FileText, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
 import { documents, saveBlob, type DocumentItem, type DocumentVerification } from "../../api/documents";
 import { sharing, type DocumentShare } from "../../api/sharing";
 import { risk } from "../../api/risk";
@@ -25,6 +26,21 @@ function formatSize(bytes?: number) {
   return bytes < 1024 * 1024
     ? `${(bytes / 1024).toFixed(1)} KB`
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function classificationColor(level?: string) {
+  switch (level?.toUpperCase()) {
+    case "RESTRICTED":
+      return "border-red-500/30 bg-red-500/10 text-red-400";
+    case "CONFIDENTIAL":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+    case "INTERNAL":
+      return "border-blue-500/30 bg-blue-500/10 text-blue-400";
+    case "PUBLIC":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
+    default:
+      return "border-white/10 bg-white/5 text-neutral-400";
+  }
 }
 
 export default function Sharing() {
@@ -58,9 +74,9 @@ export default function Sharing() {
   const canShare = can("documents.share");
   const canRevoke = can("documents.revoke");
 
-  const button = "rounded border px-3 py-2 text-sm disabled:opacity-50";
-  const input = "w-full rounded border px-3 py-2";
-  const panel = "rounded-lg border bg-white p-5";
+  const button = "btn-secondary text-xs disabled:opacity-40";
+  const input = "input-style text-xs";
+  const panel = "rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl space-y-4";
 
   useEffect(() => {
     void loadDocuments();
@@ -104,34 +120,40 @@ export default function Sharing() {
   }
 
   function mayDownload(doc: DocumentItem) {
-    return canDownload && (isOwner(doc) || doc.permission === "DOWNLOAD");
+    return (
+      canDownload &&
+      (isOwner(doc) || doc.permission === "DOWNLOAD")
+    );
   }
 
-  async function accessFile(doc: DocumentItem, action: FileAction, token?: string) {
-    if (action === "download") {
-      const blob = await documents.download(doc.id, token);
-      saveBlob(blob, doc.filename);
-      setMessage(`Downloaded ${doc.filename}.`);
-      return;
-    }
-
-    const blob = await documents.view(doc.id, token);
-    setPreview({ doc, url: URL.createObjectURL(blob) });
-  }
-
-  async function openFile(doc: DocumentItem, action: FileAction) {
+  async function openFile(doc: DocumentItem, fileAction: FileAction, stepUpToken?: string) {
     clearMessages();
-    setBusy(`${action}-${doc.id}`);
+    setBusy(`${fileAction}-${doc.id}`);
 
     try {
-      await accessFile(doc, action);
+      const blob =
+        fileAction === "view"
+          ? await documents.view(doc.id, stepUpToken)
+          : await documents.download(doc.id, stepUpToken);
+
+      if (fileAction === "view") {
+        if (preview) URL.revokeObjectURL(preview.url);
+        const url = URL.createObjectURL(blob);
+        setPreview({ doc, url });
+      } else {
+        saveBlob(blob, doc.filename);
+        setMessage(`Downloaded ${doc.filename}.`);
+      }
+
+      setPending(null);
+      setOtp("");
+      setStepUpError("");
     } catch (err) {
       const challenge = stepUpChallenge(err);
-
-      if (challenge?.challenge_id) {
+      if (challenge && challenge.challenge_id) {
         setPending({
           doc,
-          action,
+          action: fileAction,
           challengeId: challenge.challenge_id,
           demoOtp: challenge.challenge_otp,
         });
@@ -153,30 +175,10 @@ export default function Sharing() {
     setStepUpError("");
 
     try {
-      const { step_up_token } = await risk.verifyStepUp(
-        pending.challengeId,
-        otp.trim(),
-      );
-      await accessFile(pending.doc, pending.action, step_up_token);
-      setPending(null);
-      setOtp("");
+      const { step_up_token } = await risk.verifyStepUp(pending.challengeId, otp.trim());
+      await openFile(pending.doc, pending.action, step_up_token);
     } catch (err) {
       setStepUpError(errorMessage(err));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function downloadEncrypted(doc: DocumentItem) {
-    clearMessages();
-    setBusy(`encrypted-${doc.id}`);
-
-    try {
-      saveBlob(await documents.downloadEncrypted(doc.id), `${doc.filename}.enc`);
-      setMessage(`Downloaded encrypted copy of ${doc.filename}.`);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
       setBusy("");
     }
   }
@@ -194,10 +196,27 @@ export default function Sharing() {
     }
   }
 
+  async function downloadEncrypted(doc: DocumentItem) {
+    clearMessages();
+    setBusy(`encrypted-${doc.id}`);
+
+    try {
+      const blob = await documents.downloadEncrypted(doc.id);
+      saveBlob(blob, `${doc.filename}.enc`);
+      setMessage(`Downloaded encrypted payload for ${doc.filename}.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function openSharing(doc: DocumentItem) {
     clearMessages();
     setSharingDoc(doc);
-    setShares([]);
+    setRecipientEmail("");
+    setPermission("READ");
+    setExpiresAt("");
     setBusy("shares");
 
     try {
@@ -223,9 +242,9 @@ export default function Sharing() {
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       });
 
-      setShares(await sharing.list(sharingDoc.id));
       setRecipientEmail("");
       setExpiresAt("");
+      setShares(await sharing.list(sharingDoc.id));
       setMessage("Document access granted.");
     } catch (err) {
       setError(errorMessage(err));
@@ -252,46 +271,73 @@ export default function Sharing() {
   }
 
   return (
-    <main className="space-y-5 p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <main className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Documents & Sharing</h1>
-          <p className="text-sm text-slate-500">
-            Access documents, manage shares, and verify integrity.
+          <p className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
+            Cryptographic Vault
+          </p>
+          <h1 className="mt-1 text-2xl font-light tracking-tight text-white sm:text-3xl">
+            Documents & Sharing
+          </h1>
+          <p className="mt-1 text-xs text-neutral-400">
+            Access encrypted files, grant revocable time-bounded access, and verify mathematical integrity.
           </p>
         </div>
         <button
           type="button"
-          className={button}
+          className="btn-secondary text-xs flex items-center gap-1.5"
           disabled={loading}
           onClick={() => void loadDocuments()}
         >
-          {loading ? "Loading…" : "Refresh"}
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          <span>{loading ? "Loading…" : "Refresh"}</span>
         </button>
       </div>
 
-      {error && <p role="alert" className="text-red-700">{error}</p>}
-      {message && <p role="status" className="text-green-700">{message}</p>}
+      {error && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-300">
+          <AlertCircle size={15} className="shrink-0 text-red-400" />
+          <p role="alert">{error}</p>
+        </div>
+      )}
+
+      {message && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-300">
+          <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
+          <p role="status">{message}</p>
+        </div>
+      )}
 
       {loading ? (
-        <p>Loading documents…</p>
+        <p className="py-8 text-center text-xs text-neutral-400">Loading vault documents…</p>
       ) : docList.length === 0 ? (
-        <p>No accessible documents found.</p>
+        <div className="rounded-2xl border border-dashed border-white/15 p-12 text-center text-neutral-500">
+          <FileText size={32} className="mx-auto text-neutral-600 mb-3" />
+          <p className="text-sm">No accessible documents found in this vault.</p>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {docList.map((doc) => (
-            <section key={doc.id} className={panel}>
-              <h2 className="break-all font-semibold">{doc.filename}</h2>
-              <p className="mt-1 break-all text-xs text-slate-500">
-                ID: {doc.id}
-              </p>
-              <p className="mt-2 text-sm text-slate-600">
-                {doc.classification} · {formatSize(doc.file_size_bytes)}
-                {" · "}{formatDate(doc.created_at)}
-                {" · "}{doc.permission ?? "Accessible"}
+            <section key={doc.id} className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl transition hover:border-white/20">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="break-all text-base font-semibold text-white">{doc.filename}</h2>
+                  <p className="mt-1 font-mono text-[10px] text-amber-400/80">
+                    ID: {doc.id}
+                  </p>
+                </div>
+                <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-mono font-medium uppercase ${classificationColor(doc.classification)}`}>
+                  {doc.classification}
+                </span>
+              </div>
+
+              <p className="mt-3 text-xs text-neutral-400">
+                {formatSize(doc.file_size_bytes)} · {formatDate(doc.created_at)} ·{" "}
+                <span className="text-neutral-200">{doc.permission ?? "Accessible"}</span>
               </p>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-5 flex flex-wrap gap-2 pt-2 border-t border-white/[0.06]">
                 {mayRead(doc) && doc.mime_type === "application/pdf" && (
                   <button
                     type="button"
@@ -310,7 +356,7 @@ export default function Sharing() {
                     disabled={Boolean(busy)}
                     onClick={() => void openFile(doc, "download")}
                   >
-                    Download
+                    Download Decrypted
                   </button>
                 )}
 
@@ -322,7 +368,7 @@ export default function Sharing() {
                       disabled={Boolean(busy)}
                       onClick={() => void verifyDocument(doc)}
                     >
-                      Verify
+                      Verify Integrity
                     </button>
                     <button
                       type="button"
@@ -330,7 +376,7 @@ export default function Sharing() {
                       disabled={Boolean(busy)}
                       onClick={() => void downloadEncrypted(doc)}
                     >
-                      Download encrypted
+                      Download Ciphertext (.enc)
                     </button>
                   </>
                 )}
@@ -338,11 +384,11 @@ export default function Sharing() {
                 {isOwner(doc) && canShare && (
                   <button
                     type="button"
-                    className={button}
+                    className="btn-primary text-xs"
                     disabled={Boolean(busy)}
                     onClick={() => void openSharing(doc)}
                   >
-                    Manage sharing
+                    Manage Access Grants
                   </button>
                 )}
               </div>
@@ -351,10 +397,11 @@ export default function Sharing() {
         </div>
       )}
 
+      {/* Preview Modal */}
       {preview && (
         <section className={panel} role="dialog" aria-modal="true" aria-label="Document preview">
-          <div className="mb-3 flex justify-between gap-3">
-            <h2 className="font-semibold">{preview.doc.filename}</h2>
+          <div className="flex justify-between items-center gap-3 border-b border-white/[0.08] pb-3">
+            <h2 className="font-semibold text-white text-sm">{preview.doc.filename}</h2>
             <button type="button" className={button} onClick={() => setPreview(null)}>
               Close
             </button>
@@ -362,47 +409,51 @@ export default function Sharing() {
           <iframe
             title={`Preview of ${preview.doc.filename}`}
             src={preview.url}
-            className="h-[70vh] w-full border"
+            className="h-[70vh] w-full rounded-xl border border-white/10 bg-black/60"
           />
         </section>
       )}
 
+      {/* Verification Result Dialog */}
       {verified && (
         <section className={panel} role="dialog" aria-modal="true" aria-label="Verification results">
-          <div className="flex justify-between gap-3">
-            <h2 className="font-semibold">Verification: {verified.doc.filename}</h2>
+          <div className="flex justify-between items-center gap-3 border-b border-white/[0.08] pb-3">
+            <h2 className="font-semibold text-white text-sm">
+              Verification: {verified.doc.filename}
+            </h2>
             <button type="button" className={button} onClick={() => setVerified(null)}>
               Close
             </button>
           </div>
 
-          <p className="mt-3">
-            Document integrity:{" "}
-            <strong>
-              {verified.result.document_integrity_valid ? "Valid" : "Failed"}
-            </strong>
-          </p>
-          <p className="mt-1 text-sm">
-            SHA-256: {verified.result.content_hash}
-          </p>
+          <div className="rounded-xl border border-white/[0.08] bg-black/40 p-4 space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span>Cryptographic Integrity:</span>
+              <strong className={verified.result.document_integrity_valid ? "text-emerald-400 font-mono" : "text-red-400 font-mono"}>
+                {verified.result.document_integrity_valid ? "VALID (0-Bit Tampering Detected)" : "FAILED (Integrity Compromised)"}
+              </strong>
+            </div>
+            <p className="font-mono text-[11px] text-neutral-400 break-all">
+              SHA-256 Digest: <span className="text-amber-300">{verified.result.content_hash}</span>
+            </p>
+          </div>
 
           {!verified.result.has_signatures && (
-            <p className="mt-3">No signatures recorded.</p>
+            <p className="text-xs text-neutral-400">No cryptographic digital signatures recorded on this file.</p>
           )}
 
           {verified.result.signatures.map((signature) => (
-            <div key={signature.id} className="mt-3 rounded border p-3 text-sm">
-              <p>
-                Signature:{" "}
-                <strong>
-                  {signature.cryptographically_valid ? "Valid" : "Invalid"}
-                </strong>
-              </p>
-              <p>Signer ID: {signature.signer_id}</p>
-              <p>Key status: {signature.key_status}</p>
+            <div key={signature.id} className="rounded-xl border border-white/[0.08] bg-black/40 p-4 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-mono font-semibold text-white">Signer ID: {signature.signer_id}</span>
+                <span className={signature.cryptographically_valid ? "font-mono text-emerald-400" : "font-mono text-red-400"}>
+                  {signature.cryptographically_valid ? "RSA-PSS VALID" : "INVALID SIGNATURE"}
+                </span>
+              </div>
+              <p className="text-neutral-400 font-mono text-[10px]">Key Status: {signature.key_status}</p>
               {!signature.key_usable_now && (
-                <p className="text-amber-700">
-                  This key cannot be used for new signatures.
+                <p className="text-amber-400 text-[11px]">
+                  Note: This key has been retired or revoked for subsequent signing.
                 </p>
               )}
             </div>
@@ -410,10 +461,13 @@ export default function Sharing() {
         </section>
       )}
 
+      {/* Sharing Management Modal */}
       {sharingDoc && (
         <section className={panel} role="dialog" aria-modal="true" aria-label="Manage sharing">
-          <div className="flex justify-between gap-3">
-            <h2 className="font-semibold">Sharing: {sharingDoc.filename}</h2>
+          <div className="flex justify-between items-center gap-3 border-b border-white/[0.08] pb-3">
+            <h2 className="font-semibold text-white text-sm">
+              Grant Time-Bounded Access: {sharingDoc.filename}
+            </h2>
             <button
               type="button"
               className={button}
@@ -424,20 +478,21 @@ export default function Sharing() {
             </button>
           </div>
 
-          <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={grantAccess}>
-            <label className="space-y-1 text-sm">
-              <span>Recipient email</span>
+          <form className="grid gap-3 sm:grid-cols-2 rounded-xl border border-white/[0.08] bg-black/40 p-4" onSubmit={grantAccess}>
+            <div className="space-y-1">
+              <label className="field-label">Recipient User Email</label>
               <input
                 className={input}
                 type="email"
                 required
+                placeholder="colleague@tenant.com"
                 value={recipientEmail}
                 onChange={(event) => setRecipientEmail(event.target.value)}
               />
-            </label>
+            </div>
 
-            <label className="space-y-1 text-sm">
-              <span>Permission</span>
+            <div className="space-y-1">
+              <label className="field-label">Permission Level</label>
               <select
                 className={input}
                 value={permission}
@@ -445,48 +500,50 @@ export default function Sharing() {
                   setPermission(event.target.value as "READ" | "DOWNLOAD")
                 }
               >
-                <option value="READ">Read</option>
-                <option value="DOWNLOAD">Download</option>
+                <option value="READ">READ (In-Browser Decryption)</option>
+                <option value="DOWNLOAD">DOWNLOAD (Save Local File)</option>
               </select>
-            </label>
+            </div>
 
-            <label className="space-y-1 text-sm">
-              <span>Expires at (optional)</span>
+            <div className="space-y-1">
+              <label className="field-label">Expiration Date & Time (Optional)</label>
               <input
                 className={input}
                 type="datetime-local"
                 value={expiresAt}
                 onChange={(event) => setExpiresAt(event.target.value)}
               />
-            </label>
+            </div>
 
             <div className="flex items-end">
-              <button className={button} disabled={Boolean(busy)}>
-                {busy === "share" ? "Sharing…" : "Grant access"}
+              <button className="btn-primary text-xs w-full justify-center" disabled={Boolean(busy)}>
+                {busy === "share" ? "Enforcing Share…" : "Grant Cryptographic Access"}
               </button>
             </div>
           </form>
 
-          <h3 className="mt-6 font-semibold">Access grants</h3>
-          {busy === "shares" && <p>Loading grants…</p>}
+          <h3 className="font-semibold text-white text-xs uppercase tracking-wider pt-2">
+            Existing Access Grants
+          </h3>
+          {busy === "shares" && <p className="text-xs text-neutral-400">Loading active grants…</p>}
           {shares.length === 0 && busy !== "shares" && (
-            <p className="mt-2 text-sm text-slate-500">No grants found.</p>
+            <p className="text-xs text-neutral-500">No active access grants found for this document.</p>
           )}
 
-          <div className="mt-2 space-y-2">
+          <div className="space-y-2">
             {shares.map((share) => (
-              <div key={share.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-3 text-sm">
+              <div key={share.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-black/40 p-3.5 text-xs">
                 <div>
-                  <p>{share.recipient_email} · {share.permission}</p>
-                  <p className="text-slate-500">
-                    {share.status} · Expires: {formatDate(share.expires_at)}
+                  <p className="font-medium text-white">{share.recipient_email} · <span className="font-mono text-amber-400">{share.permission}</span></p>
+                  <p className="text-neutral-500 text-[11px]">
+                    Status: {share.status} · Expires: {formatDate(share.expires_at)}
                   </p>
                 </div>
 
                 {canRevoke && share.status === "ACTIVE" && (
                   <button
                     type="button"
-                    className={button}
+                    className="btn-secondary text-xs text-red-400 hover:text-red-300 border-red-500/30"
                     disabled={Boolean(busy)}
                     onClick={() => void revokeAccess(share)}
                   >
@@ -499,35 +556,43 @@ export default function Sharing() {
         </section>
       )}
 
+      {/* Step-Up Challenge Dialog */}
       {pending && (
         <section className={panel} role="dialog" aria-modal="true" aria-label="Step-up verification">
-          <h2 className="font-semibold">Verify your identity</h2>
-          <p className="mt-2 text-sm">
-            Enter the one-time code to {pending.action} {pending.doc.filename}.
-          </p>
+          <div className="space-y-2">
+            <h2 className="text-base font-semibold text-white">Adaptive Step-Up Verification</h2>
+            <p className="text-xs text-neutral-400">
+              The real-time risk scorer detected an anomaly on this operation. Enter your 6-digit one-time code to {pending.action} <strong className="text-white">{pending.doc.filename}</strong>.
+            </p>
+          </div>
 
           {pending.demoOtp && (
-            <p className="mt-2 text-sm text-amber-700">
-              Demo code supplied by the current backend: {pending.demoOtp}
-            </p>
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300 font-mono">
+              Demo Code: <span className="font-bold select-all text-white">{pending.demoOtp}</span>
+            </div>
           )}
 
           {stepUpError && (
-            <p role="alert" className="mt-2 text-red-700">{stepUpError}</p>
+            <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+              <AlertCircle size={14} className="shrink-0 text-red-400" />
+              <p role="alert">{stepUpError}</p>
+            </div>
           )}
 
-          <form className="mt-4 flex flex-wrap gap-2" onSubmit={verifyOtp}>
+          <form className="flex flex-wrap gap-2.5" onSubmit={verifyOtp}>
             <input
-              className={input}
+              className="input-style text-center font-mono tracking-widest text-base max-w-44"
               aria-label="One-time code"
               autoComplete="one-time-code"
               inputMode="numeric"
+              maxLength={6}
               required
+              placeholder="••••••"
               value={otp}
               onChange={(event) => setOtp(event.target.value)}
             />
-            <button className={button} disabled={busy === "otp"}>
-              {busy === "otp" ? "Verifying…" : "Verify and continue"}
+            <button className="btn-primary text-xs" disabled={busy === "otp"}>
+              {busy === "otp" ? "Verifying…" : "Verify and Continue"}
             </button>
             <button
               type="button"

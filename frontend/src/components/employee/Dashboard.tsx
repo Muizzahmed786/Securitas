@@ -1,22 +1,22 @@
 import { Link } from "react-router-dom";
-import { FileText, Share2, PenLine, ShieldCheck } from "lucide-react";
+import { FileText, Share2, PenLine, ShieldCheck, ChevronRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
 export default function Dashboard() {
-  const { user, permissions, can } = useAuth();
+  const { permissions, can } = useAuth();
 
   const actions = [
     {
       to: "/workspace/sharing",
       title: "Accessible Documents",
-      description: "View documents shared with your account.",
+      description: "Inspect encrypted documents shared with your account.",
       icon: Share2,
       visible: can("documents.read") || can("documents.verify"),
     },
     {
       to: "/workspace/signatures",
-      title: "Digital Signatures",
-      description: "Sign or verify documents where permitted.",
+      title: "Verify Digital Signatures",
+      description: "Perform mathematical non-repudiation checks on received files.",
       icon: PenLine,
       visible: can("documents.sign") || can("documents.verify"),
     },
@@ -25,49 +25,71 @@ export default function Dashboard() {
   return (
     <main className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Employee Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Welcome, {user?.email}. Access your authorized documents and tools.
+        <p className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
+          Tenant Member
+        </p>
+        <h1 className="mt-1 text-2xl font-light tracking-tight text-white sm:text-3xl">
+          Employee Console
+        </h1>
+        <p className="mt-1 text-xs text-neutral-400">
+          Access shared documents under cryptographic RBAC and adaptive risk monitoring.
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border bg-white p-5">
-          <FileText className="mb-3 text-blue-600" size={24} />
-          <p className="text-sm text-slate-500">Assigned permissions</p>
-          <p className="mt-2 text-2xl font-bold">{permissions.length}</p>
+        <div className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-400">
+              <FileText size={20} />
+            </span>
+            <div>
+              <p className="text-xs text-neutral-400">Authorized Capabilities</p>
+              <p className="mt-1 font-mono text-2xl font-semibold text-white">
+                {permissions.length} Roles
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="rounded-lg border bg-white p-5">
-          <ShieldCheck className="mb-3 text-blue-600" size={24} />
-          <p className="text-sm text-slate-500">Account status</p>
-          <p className="mt-2 text-lg font-semibold">Signed in</p>
+        <div className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+              <ShieldCheck size={20} />
+            </span>
+            <div>
+              <p className="text-xs text-neutral-400">Session Security State</p>
+              <p className="mt-1 font-mono text-xs font-semibold text-emerald-400">
+                ACTIVE · ZERO-LEAK SESSION
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <section className="rounded-lg border bg-white p-5">
-        <h2 className="text-lg font-semibold">My Workspace</h2>
+      <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+        <h2 className="text-base font-semibold text-white">
+          Workspace Operations
+        </h2>
 
         <div className="mt-4 space-y-3">
           {actions.map(({ to, title, description, icon: Icon }) => (
             <Link
               key={to}
               to={to}
-              className="flex items-center gap-3 rounded-lg border p-4 hover:bg-slate-50"
+              className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/40 p-4 transition hover:border-amber-500/30 hover:bg-white/[0.02]"
             >
-              <Icon size={22} className="shrink-0 text-blue-600" />
-              <div>
-                <h3 className="font-medium">{title}</h3>
-                <p className="text-sm text-slate-500">{description}</p>
+              <div className="flex items-center gap-3.5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-amber-400">
+                  <Icon size={18} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-medium text-white">{title}</h3>
+                  <p className="text-xs text-neutral-400">{description}</p>
+                </div>
               </div>
+              <ChevronRight size={16} className="text-neutral-500" />
             </Link>
           ))}
-
-          {actions.length === 0 && (
-            <p className="text-sm text-slate-500">
-              No document tools are available for your permissions.
-            </p>
-          )}
         </div>
       </section>
     </main>

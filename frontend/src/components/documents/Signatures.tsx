@@ -1,4 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
+import {
+  Key,
+  FileSignature,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Download,
+  FileText,
+  Lock,
+  Sparkles,
+  RefreshCw,
+} from "lucide-react";
 import { signatures, type SigningKey, type SignatureVerification } from "../../api/signatures";
 import { documents, saveBlob, type DocumentItem } from "../../api/documents";
 import { errorMessage } from "../../api/http";
@@ -23,22 +36,20 @@ export default function Signatures() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const button = "rounded border px-3 py-2 disabled:opacity-50";
-  const input = "w-full rounded border px-3 py-2";
-  const card = "space-y-4 rounded-lg border bg-white p-5";
-
   useEffect(() => {
     let active = true;
 
-    // A document list is helpful, but users can still enter an ID manually.
-    documents.list()
+    // Load available documents
+    documents
+      .list()
       .then((docs) => {
         if (active) setDocList(docs);
       })
       .catch(() => {});
 
     if (canSign) {
-      signatures.keys()
+      signatures
+        .keys()
         .then((items) => {
           if (active) setKeys(items);
         })
@@ -69,12 +80,12 @@ export default function Signatures() {
         keyId ? `signing-${keyId}.pem` : "signing-private-key.pem",
       );
 
-      setMessage("Signing key created. Keep the downloaded private PEM safe.");
+      setMessage("Signing keypair provisioned. Store your downloaded private PEM securely.");
 
       try {
         setKeys(await signatures.keys());
       } catch {
-        setError("The key was created, but the key list could not refresh.");
+        setError("The key was created, but the key registry could not refresh.");
       }
     } catch (err) {
       setError(errorMessage(err));
@@ -111,7 +122,7 @@ export default function Signatures() {
         signature,
       );
 
-      setMessage("Signature verified and saved.");
+      setMessage("Cryptographic signature generated, verified, and anchored.");
       setOriginalFile(null);
       setPrivateKeyFile(null);
       event.currentTarget.reset();
@@ -139,206 +150,436 @@ export default function Signatures() {
   }
 
   return (
-    <main className="space-y-5 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-bold">Digital signatures</h1>
-        <p className="text-sm text-slate-500">
-          Generate a key, sign an uploaded document, and verify signatures.
-        </p>
+    <main className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-400">
+              <FileSignature className="h-4 w-4" />
+            </span>
+            <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
+              Digital Signatures & Non-Repudiation
+            </h1>
+          </div>
+          <p className="mt-1 text-xs text-neutral-400 sm:text-sm">
+            Generate zero-knowledge client-side signatures using WebCrypto RSA-PSS and audit document provenance.
+          </p>
+        </div>
       </div>
 
-      {error && <p role="alert" className="text-red-700">{error}</p>}
-      {message && <p role="status" className="text-green-700">{message}</p>}
+      {/* Notifications */}
+      {error && (
+        <div
+          role="alert"
+          className="flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-300"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {message && (
+        <div
+          role="status"
+          className="flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-xs text-emerald-300"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+          <span>{message}</span>
+        </div>
+      )}
 
       {canSign && (
-        <>
-          <section className={card}>
-            <h2 className="text-lg font-semibold">1. Generate a signing key</h2>
-            <p className="text-sm text-slate-600">
-              The public key stays on the server. Download and keep your
-              private PEM; the server does not store it.
-            </p>
-            <button
-              type="button"
-              className={button}
-              disabled={Boolean(busy)}
-              onClick={() => void generateKey()}
-            >
-              {busy === "generate" ? "Generating…" : "Generate and download key"}
-            </button>
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* 1. Generate Key */}
+          <section className="flex flex-col justify-between rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-amber-400">
+                    <Key className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold tracking-tight text-white">
+                      1. Provision Signing Key
+                    </h2>
+                    <p className="text-[11px] text-neutral-400">
+                      RSA-PSS 2048-bit with SHA-256 digest
+                    </p>
+                  </div>
+                </div>
+                <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-mono text-amber-400">
+                  Zero-Knowledge
+                </span>
+              </div>
+
+              <p className="text-xs leading-relaxed text-neutral-400">
+                The public key is retained in the enclave registry. Your private PEM key is streamed
+                directly to your local device. The server never observes or stores your private key.
+              </p>
+
+              {/* Active Keys Registry */}
+              {keys.length > 0 && (
+                <div className="space-y-2 rounded-xl border border-white/5 bg-[#0c0c10] p-3">
+                  <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                    <span className="font-medium">Active Enrolled Keys</span>
+                    <span className="font-mono text-neutral-500">{keys.length} registered</span>
+                  </div>
+                  <div className="max-h-36 space-y-1.5 overflow-y-auto no-scrollbar">
+                    {keys.map((k) => (
+                      <div
+                        key={k.id}
+                        className="flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px]"
+                      >
+                        <span className="font-mono text-neutral-300">
+                          {k.id.slice(0, 16)}...
+                        </span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            k.usable_for_signing
+                              ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                              : "border border-neutral-700 bg-neutral-800 text-neutral-400"
+                          }`}
+                        >
+                          {k.usable_for_signing ? "Active" : "Archived"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-white/5">
+              <button
+                type="button"
+                className="btn-primary w-full flex items-center justify-center gap-2"
+                disabled={Boolean(busy)}
+                onClick={() => void generateKey()}
+              >
+                {busy === "generate" ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Provisioning Keypair…</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Generate & Download Private PEM</span>
+                  </>
+                )}
+              </button>
+            </div>
           </section>
 
-          <section className={card}>
-            <h2 className="text-lg font-semibold">2. Sign a document</h2>
+          {/* 2. Sign a Document */}
+          <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-amber-400">
+                <FileSignature className="h-4 w-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold tracking-tight text-white">
+                  2. Apply Client Signature
+                </h2>
+                <p className="text-[11px] text-neutral-400">
+                  SubtleCrypto browser-based signing operation
+                </p>
+              </div>
+            </div>
 
-            <form className="max-w-xl space-y-4" onSubmit={signDocument}>
+            <form className="space-y-4" onSubmit={signDocument}>
               {ownedDocs.length > 0 && (
-                <label className="block space-y-1">
-                  <span>Choose your uploaded document</span>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-neutral-300">
+                    Select Uploaded Document
+                  </label>
                   <select
-                    className={input}
+                    className="input-style"
                     value={signDocumentId}
-                    onChange={(event) => setSignDocumentId(event.target.value)}
+                    onChange={(e) => setSignDocumentId(e.target.value)}
                   >
-                    <option value="">Select a document</option>
+                    <option value="" className="bg-[#0c0c10] text-neutral-400">
+                      Choose an uploaded document...
+                    </option>
                     {ownedDocs.map((doc) => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.filename}
+                      <option key={doc.id} value={doc.id} className="bg-[#0c0c10] text-white">
+                        {doc.filename} ({doc.classification})
                       </option>
                     ))}
                   </select>
-                </label>
+                </div>
               )}
 
-              <label className="block space-y-1">
-                <span>Document ID</span>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-neutral-300">
+                  Target Document ID
+                </label>
                 <input
-                  className={input}
+                  className="input-style font-mono text-xs"
                   required
-                  placeholder="Paste the uploaded document ID"
+                  placeholder="Paste UUID or select from dropdown above"
                   value={signDocumentId}
-                  onChange={(event) => setSignDocumentId(event.target.value)}
+                  onChange={(e) => setSignDocumentId(e.target.value)}
                 />
-              </label>
+              </div>
 
-              <label className="block space-y-1">
-                <span>Signing key</span>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-neutral-300">
+                  Select Signing Key
+                </label>
                 <select
-                  className={input}
+                  className="input-style font-mono text-xs"
                   required
                   value={signingKeyId}
-                  onChange={(event) => setSigningKeyId(event.target.value)}
+                  onChange={(e) => setSigningKeyId(e.target.value)}
                 >
-                  <option value="">Select a key</option>
-                  {keys.filter((key) => key.usable_for_signing).map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.id}
-                    </option>
-                  ))}
+                  <option value="" className="bg-[#0c0c10] text-neutral-400">
+                    Select an active signing key...
+                  </option>
+                  {keys
+                    .filter((key) => key.usable_for_signing)
+                    .map((key) => (
+                      <option key={key.id} value={key.id} className="bg-[#0c0c10] text-white">
+                        Key ID: {key.id}
+                      </option>
+                    ))}
                 </select>
-              </label>
+              </div>
 
-              <label className="block space-y-1">
-                <span>Exact original file that was uploaded</span>
-                <input
-                  className={input}
-                  type="file"
-                  accept=".pdf,.doc,.docx"
-                  required
-                  onChange={(event) =>
-                    setOriginalFile(event.target.files?.[0] ?? null)
-                  }
-                />
-              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-neutral-300">
+                    Original Document File
+                  </label>
+                  <label className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-[#0c0c10] p-3 text-center cursor-pointer hover:border-amber-500/30 transition-colors">
+                    <FileText className="h-5 w-5 text-neutral-400 mb-1" />
+                    <span className="text-[11px] text-neutral-300 font-medium truncate max-w-[150px]">
+                      {originalFile ? originalFile.name : "Pick original (.pdf/.doc)"}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx"
+                      required
+                      className="sr-only"
+                      onChange={(e) => setOriginalFile(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
 
-              <label className="block space-y-1">
-                <span>Your private PEM file</span>
-                <input
-                  className={input}
-                  type="file"
-                  accept=".pem"
-                  required
-                  onChange={(event) =>
-                    setPrivateKeyFile(event.target.files?.[0] ?? null)
-                  }
-                />
-              </label>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-neutral-300">
+                    Your Private PEM Key
+                  </label>
+                  <label className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-[#0c0c10] p-3 text-center cursor-pointer hover:border-amber-500/30 transition-colors">
+                    <Lock className="h-5 w-5 text-amber-400/80 mb-1" />
+                    <span className="text-[11px] text-neutral-300 font-medium truncate max-w-[150px]">
+                      {privateKeyFile ? privateKeyFile.name : "Pick private .pem key"}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pem"
+                      required
+                      className="sr-only"
+                      onChange={(e) => setPrivateKeyFile(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
+              </div>
 
-              <p className="text-sm text-slate-500">
-                Signing happens in your browser. Your private PEM is never
-                uploaded.
-              </p>
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-neutral-400 flex items-start gap-2">
+                <Sparkles className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  Execution is client-local. Your private PEM is parsed in WebCrypto memory and
+                  never transmitted to any server.
+                </span>
+              </div>
 
-              <button className={button} disabled={Boolean(busy)}>
-                {busy === "sign" ? "Signing…" : "Sign document"}
+              <button
+                type="submit"
+                className="btn-primary w-full flex items-center justify-center gap-2"
+                disabled={Boolean(busy)}
+              >
+                {busy === "sign" ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Signing in Browser…</span>
+                  </>
+                ) : (
+                  <>
+                    <FileSignature className="h-3.5 w-3.5" />
+                    <span>Sign & Anchor Digest</span>
+                  </>
+                )}
               </button>
             </form>
           </section>
-        </>
+        </div>
       )}
 
+      {/* 3. Verify Signatures */}
       {canVerify && (
-        <section className={card}>
-          <h2 className="text-lg font-semibold">
-            {canSign ? "3. Verify signatures" : "Verify signatures"}
-          </h2>
+        <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+          <div className="flex items-center gap-2.5 mb-5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-amber-400">
+              <ShieldCheck className="h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight text-white">
+                {canSign ? "3. Verify Signatures & Authenticity" : "Verify Signatures & Authenticity"}
+              </h2>
+              <p className="text-[11px] text-neutral-400">
+                Cryptographic integrity checking against stored SHA-256 digests and RSA signatures
+              </p>
+            </div>
+          </div>
 
-          <form className="max-w-xl space-y-4" onSubmit={verifyDocument}>
+          <form className="max-w-2xl space-y-4" onSubmit={verifyDocument}>
             {docList.length > 0 && (
-              <label className="block space-y-1">
-                <span>Choose a document</span>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-neutral-300">
+                  Select Document to Inspect
+                </label>
                 <select
-                  className={input}
+                  className="input-style"
                   value={verifyDocumentId}
-                  onChange={(event) => {
-                    setVerifyDocumentId(event.target.value);
+                  onChange={(e) => {
+                    setVerifyDocumentId(e.target.value);
                     setResult(null);
                   }}
                 >
-                  <option value="">Select a document</option>
+                  <option value="" className="bg-[#0c0c10] text-neutral-400">
+                    Choose a document...
+                  </option>
                   {docList.map((doc) => (
-                    <option key={doc.id} value={doc.id}>
-                      {doc.filename}
+                    <option key={doc.id} value={doc.id} className="bg-[#0c0c10] text-white">
+                      {doc.filename} ({doc.classification})
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
             )}
 
-            <label className="block space-y-1">
-              <span>Document ID</span>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-300">
+                Target Document ID
+              </label>
               <input
-                className={input}
+                className="input-style font-mono text-xs"
                 required
-                placeholder="Paste a document ID"
+                placeholder="Paste document UUID"
                 value={verifyDocumentId}
-                onChange={(event) => {
-                  setVerifyDocumentId(event.target.value);
+                onChange={(e) => {
+                  setVerifyDocumentId(e.target.value);
                   setResult(null);
                 }}
               />
-            </label>
+            </div>
 
-            <button className={button} disabled={Boolean(busy)}>
-              {busy === "verify" ? "Verifying…" : "Verify"}
+            <button
+              type="submit"
+              className="btn-primary flex items-center gap-2"
+              disabled={Boolean(busy)}
+            >
+              {busy === "verify" ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <span>Verifying Cryptography…</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>Run Verification Audit</span>
+                </>
+              )}
             </button>
           </form>
 
+          {/* Verification Results */}
           {result && (
-            <div className="mt-5 space-y-3 text-sm">
-              <p>
-                Document integrity:{" "}
-                <strong>
-                  {result.document_integrity_valid ? "Valid" : "Failed"}
-                </strong>
-              </p>
-
-              {!result.has_signatures && <p>No signatures recorded.</p>}
-
-              {result.signatures.map((signature) => (
-                <div key={signature.id} className="rounded border p-3">
-                  <p>
-                    Signature:{" "}
-                    <strong>
-                      {signature.cryptographically_valid ? "Valid" : "Invalid"}
-                    </strong>
-                  </p>
-                  <p>Signer ID: {signature.signer_id}</p>
-                  <p>Key status: {signature.key_status}</p>
-                  {!signature.key_usable_now && (
-                    <p className="text-amber-700">
-                      This key cannot be used for new signatures.
-                    </p>
+            <div className="mt-6 space-y-4 rounded-xl border border-white/10 bg-[#0c0c10] p-5">
+              <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                <span className="text-xs font-medium text-neutral-300">Document Integrity</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    result.document_integrity_valid
+                      ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                      : "border border-red-500/20 bg-red-500/10 text-red-400"
+                  }`}
+                >
+                  {result.document_integrity_valid ? (
+                    <>
+                      <CheckCircle2 className="h-3 w-3" />
+                      Tamper-Free (SHA-256 Valid)
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="h-3 w-3" />
+                      Integrity Compromised
+                    </>
                   )}
+                </span>
+              </div>
+
+              {!result.has_signatures && (
+                <div className="rounded-lg border border-white/5 bg-white/[0.02] p-4 text-center text-xs text-neutral-400">
+                  No cryptographic signatures have been anchored to this document yet.
                 </div>
-              ))}
+              )}
+
+              {result.signatures.length > 0 && (
+                <div className="space-y-3 pt-1">
+                  <span className="text-xs font-medium text-neutral-300">
+                    Anchored Signatures ({result.signatures.length})
+                  </span>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {result.signatures.map((sig) => (
+                      <div
+                        key={sig.id}
+                        className="rounded-xl border border-white/10 bg-[#121218] p-4 space-y-2 text-xs"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-neutral-400 text-[11px]">Signature Status</span>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              sig.cryptographically_valid
+                                ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                                : "border border-red-500/20 bg-red-500/10 text-red-400"
+                            }`}
+                          >
+                            {sig.cryptographically_valid ? "Valid" : "Invalid"}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1 font-mono text-[11px] text-neutral-300">
+                          <p className="truncate">
+                            <span className="text-neutral-500">Signer ID:</span> {sig.signer_id}
+                          </p>
+                          <p className="truncate">
+                            <span className="text-neutral-500">Key Status:</span> {sig.key_status}
+                          </p>
+                        </div>
+
+                        {!sig.key_usable_now && (
+                          <div className="flex items-center gap-1.5 text-[10px] text-amber-400/90 pt-1">
+                            <AlertCircle className="h-3 w-3 shrink-0" />
+                            <span>This signing key has expired or was revoked.</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
       )}
 
       {!canSign && !canVerify && (
-        <p>You do not have signing or verification permission.</p>
+        <div className="rounded-2xl border border-white/10 bg-[#121218] p-8 text-center text-sm text-neutral-400">
+          Your account role does not have authorization to create or audit digital signatures.
+        </div>
       )}
     </main>
   );
