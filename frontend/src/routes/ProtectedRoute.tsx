@@ -12,20 +12,24 @@ export default function ProtectedRoute({
 }: ProtectedRouteProps) {
   const { user, loading, permissionsLoading, can } = useAuth();
 
-  if (loading) return <div>Loading...</div>;
-
+  if (loading) return <p>Loading account…</p>;
   if (!user) return <Navigate to="/login" replace />;
 
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/workspace" replace />;
+  if (
+    allowedRoles &&
+    !allowedRoles.some(
+      (role) => role.toUpperCase() === user.role.toUpperCase(),
+    )
+  ) {
+    return <Navigate to="/workspace/dashboard" replace />;
   }
 
-  if (permissions && permissionsLoading) {
-    return <div>Loading permissions...</div>;
-  }
+  if (permissions) {
+    if (permissionsLoading) return <p>Loading permissions…</p>;
 
-  if (permissions && !permissions.some(can)) {
-    return <Navigate to="/workspace" replace />;
+    if (!permissions.some((permission) => can(permission))) {
+      return <Navigate to="/workspace/dashboard" replace />;
+    }
   }
 
   return <Outlet />;

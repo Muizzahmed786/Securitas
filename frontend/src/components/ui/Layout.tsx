@@ -1,87 +1,80 @@
-
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import {
-  LayoutDashboard,
-  Upload,
-  PenLine,
-  KeyRound,
-  UserRound,
-  ShieldCheck,
-  Menu,
-  X,
-  LogOut,
-  ChevronRight,
-  RefreshCw,
-  Share2,
-  Activity,
-} from "lucide-react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { auth } from "../../api/auth";
+import { errorMessage } from "../../api/http";
 import { useAuth } from "../../context/AuthContext";
-import { auth, errorMessage } from "../../api/client";
-import { Alert, roleName } from "./UI";
+
+function roleName(role?: string) {
+  return (role || "")
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
 export default function Layout() {
   const { user, setUser, can, permissionError, reloadPermissions } = useAuth();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
 
+  const isAdmin = user?.role === "ADMIN";
+  const isOwner = user?.role === "DOCUMENT_OWNER";
+  const isEmployee = user?.role === "EMPLOYEE";
+  const isAuditor = user?.role === "SECURITY_AUDITOR";
+
+  // A tool must match both the user's role and their permissions.
   const items = [
     {
       to: "/workspace/dashboard",
       label: "Dashboard",
-      icon: LayoutDashboard,
-      show: true,
+      visible: true,
     },
     {
       to: "/workspace/sharing",
-      label: "Documents & Sharing",
-      icon: Share2,
-      show: true,
+      label: "Documents",
+      visible:
+        (isOwner || isEmployee || isAuditor) &&
+        (can("documents.read") || can("documents.verify")),
     },
     {
-      to: "/workspace/upload",
-      label: "Document Upload",
-      icon: Upload,
-      show: can("documents.upload"),
+      to: "/workspace/owner/upload",
+      label: "Upload Document",
+      visible: isOwner && can("documents.upload"),
     },
     {
       to: "/workspace/signatures",
-      label: "Digital Signatures",
-      icon: PenLine,
-      show: can("documents.sign") || can("documents.verify"),
+      label: isOwner ? "Digital Signatures" : "Verify Signatures",
+      visible:
+        (isOwner && (can("documents.sign") || can("documents.verify"))) ||
+        ((isEmployee || isAuditor) && can("documents.verify")),
     },
     {
-      to: "/workspace/keys",
+      to: "/workspace/admin/encryption",
       label: "Encryption Setup",
-      icon: KeyRound,
-      show: can("crypto_keys.create"),
+      visible: isAdmin && can("crypto_keys.create"),
     },
     {
-      to: "/workspace/audit",
-      label: "Auditor Dashboard",
-      icon: Activity,
-      show: can("audit.read"),
+      to: "/workspace/advisor/audit",
+      label: "Audit Logs",
+      visible: (isAdmin || isAuditor) && can("audit.read"),
     },
     {
       to: "/workspace/profile",
       label: "My Account",
-      icon: UserRound,
-      show: true,
+      visible: true,
     },
-  ].filter((item) => item.show);
+  ].filter((item) => item.visible);
 
   async function signOut() {
     setBusy(true);
     setError("");
-
     try {
       await auth.logout();
       setUser(null);
       navigate("/login", { replace: true });
-    } catch (e) {
-      setError(errorMessage(e));
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -90,57 +83,30 @@ export default function Layout() {
   function sidebar() {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex items-center gap-3 border-b border-slate-200 px-6 py-7">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/25">
-            <ShieldCheck size={22} />
-          </span>
-
-          <div>
-            <span className="text-lg font-bold tracking-wide text-slate-800">
-              Securitas
-            </span>
-            <p className="mt-1 text-[10px] uppercase tracking-[.2em] text-slate-400">
-              Document Security
-            </p>
-          </div>
+        <div className="border-b px-6 py-7">
+          <p className="text-lg font-bold">Securitas</p>
+          <p className="text-sm">Document Security</p>
         </div>
-
-        <nav
-          aria-label="Main navigation"
-          className="flex-1 space-y-2 overflow-y-auto px-4 py-6"
-        >
-          {items.map(({ to, label, icon: Icon }) => (
+        <nav aria-label="Main navigation" className="flex-1 space-y-2 overflow-y-auto p-4">
+          {items.map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}
               onClick={() => setOpen(false)}
               className={({ isActive }) =>
-                `group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
-                  isActive
-                    ? "bg-blue-50 text-blue-600 shadow-sm"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                }`
+                isActive
+                  ? "block border px-4 py-3 font-bold underline"
+                  : "block px-4 py-3"
               }
             >
-              <Icon size={18} />
-              <span>{label}</span>
-              <ChevronRight size={14} className="ml-auto opacity-50" />
+              {label}
             </NavLink>
           ))}
         </nav>
-
-        <div className="border-t border-slate-200 p-4">
-          <p className="truncate px-4 text-xs text-slate-400">
-            {user?.email}
-          </p>
-
-          <button
-            onClick={() => void signOut()}
-            disabled={busy}
-            className="mt-3 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-600 transition hover:bg-red-50 hover:text-red-600"
-          >
-            <LogOut size={18} />
-            {busy ? "Signing out…" : "Sign Out"}
+        <div className="space-y-3 border-t p-4">
+          <p className="break-all text-sm">{user?.email}</p>
+          <button type="button" disabled={busy} onClick={signOut} className="w-full border px-3 py-2">
+            {busy ? "Signing out…" : "Sign out"}
           </button>
         </div>
       </div>
@@ -148,71 +114,62 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex min-h-screen bg-blue-50/40">
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-slate-200 bg-white shadow-sm md:block">
+    <div className="flex min-h-screen">
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r md:block">
         {sidebar()}
       </aside>
 
-      <button
-        onClick={() => setOpen(!open)}
-        aria-label={open ? "Close navigation" : "Open navigation"}
-        aria-expanded={open}
-        className="fixed left-4 top-4 z-50 rounded-xl border border-slate-200 bg-white p-2.5 shadow md:hidden"
-      >
-        {open ? <X size={20} /> : <Menu size={20} />}
-      </button>
+      {!open && (
+        <button
+          type="button"
+          aria-label="Open navigation"
+          aria-expanded={false}
+          onClick={() => setOpen(true)}
+          className="fixed left-4 top-4 z-40 border bg-white p-2 md:hidden"
+        >
+          Menu
+        </button>
+      )}
 
       {open && (
         <>
           <button
+            type="button"
             aria-label="Close navigation overlay"
             onClick={() => setOpen(false)}
-            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+            className="fixed inset-0 z-40 bg-white md:hidden"
           />
-
-          <aside className="fixed left-0 top-0 z-50 h-screen w-72 border-r border-slate-200 bg-white shadow-2xl md:hidden">
+          <aside className="fixed inset-y-0 left-0 z-50 w-72 border-r bg-white md:hidden">
             <button
-              onClick={() => setOpen(false)}
+              type="button"
               aria-label="Close navigation"
-              className="absolute right-3 top-3 p-2 text-slate-400"
+              onClick={() => setOpen(false)}
+              className="absolute right-3 top-2 border px-2"
             >
-              <X size={18} />
+              Close
             </button>
-
             {sidebar()}
           </aside>
         </>
       )}
 
       <div className="min-w-0 flex-1">
-        <header className="flex h-20 items-center justify-between gap-4 border-b border-blue-100 bg-white/80 px-6 pl-20 md:px-8">
-          <span className="text-sm font-medium text-slate-500">
-            Secure Document Workspace
-          </span>
-
-          <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-600">
-            {roleName(user?.role || "")}
-          </span>
+        <header className="flex min-h-20 items-center justify-between gap-4 border-b p-4 pl-24 md:px-8">
+          <span>Secure Document Workspace</span>
+          <span className="text-sm">{roleName(user?.role)}</span>
         </header>
-
-        <main className="mx-auto max-w-7xl space-y-5 p-5 md:p-8">
-          {error && <Alert message={error} />}
-
+        <div className="mx-auto max-w-7xl p-5 md:p-8">
+          {error && <p role="alert" className="mb-4 text-red-700">{error}</p>}
           {permissionError && (
-            <div className="space-y-2">
-              <Alert message={permissionError} />
-              <button
-                className="btn-secondary"
-                onClick={() => void reloadPermissions()}
-              >
-                <RefreshCw size={15} />
+            <div className="mb-4 space-y-2">
+              <p role="alert" className="text-red-700">{permissionError}</p>
+              <button type="button" onClick={() => void reloadPermissions()} className="border px-3 py-2">
                 Retry permissions
               </button>
             </div>
           )}
-
           <Outlet />
-        </main>
+        </div>
       </div>
     </div>
   );

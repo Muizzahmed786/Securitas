@@ -1,120 +1,83 @@
-
-import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
-
-import {
-  signatures,
-  documents,
-  errorMessage,
-  saveBlob,
-} from "../../api/client";
-import type {
-  SigningKey,
-  Verification,
-  DocumentItem,
-} from "../../api/client";
-
+import { useEffect, useState, type FormEvent } from "react";
+import { signatures, type SigningKey, type SignatureVerification } from "../../api/signatures";
+import { documents, saveBlob, type DocumentItem } from "../../api/documents";
+import { errorMessage } from "../../api/http";
 import { signLocally } from "../../api/signing";
 import { useAuth } from "../../context/AuthContext";
 
-
 export default function Signatures() {
-  const { can, receipts } = useAuth();
+  const { user, can } = useAuth();
 
   const canSign = can("documents.sign");
   const canVerify = can("documents.verify");
 
   const [keys, setKeys] = useState<SigningKey[]>([]);
-  const [loadingKeys, setLoadingKeys] = useState(false);
-  const [accessibleDocs, setAccessibleDocs] = useState<DocumentItem[]>([]);
-
-  const [documentId, setDocumentId] = useState("");
-  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [docList, setDocList] = useState<DocumentItem[]>([]);
+  const [signDocumentId, setSignDocumentId] = useState("");
+  const [signingKeyId, setSigningKeyId] = useState("");
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [privateKeyFile, setPrivateKeyFile] = useState<File | null>(null);
-
-  const [verifyId, setVerifyId] = useState("");
-  const [result, setResult] = useState<Verification | null>(null);
-
+  const [verifyDocumentId, setVerifyDocumentId] = useState("");
+  const [result, setResult] = useState<SignatureVerification | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  const button = "rounded border px-3 py-2 disabled:opacity-50";
+  const input = "w-full rounded border px-3 py-2";
+  const card = "space-y-4 rounded-lg border bg-white p-5";
+
   useEffect(() => {
     let active = true;
 
-    documents
-      .list()
-      .then((data) => {
-        if (active) setAccessibleDocs(data);
+    // A document list is helpful, but users can still enter an ID manually.
+    documents.list()
+      .then((docs) => {
+        if (active) setDocList(docs);
       })
-      .catch(() => {
-        // Document selection remains optional; manual UUID entry is available.
-      });
+      .catch(() => {});
 
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!canSign) return;
-
-    let active = true;
-    setLoadingKeys(true);
-
-    signatures
-      .keys()
-      .then((data) => {
-        if (active) setKeys(data);
-      })
-      .catch((error) => {
-        if (active) setError(errorMessage(error));
-      })
-      .finally(() => {
-        if (active) setLoadingKeys(false);
-      });
+    if (canSign) {
+      signatures.keys()
+        .then((items) => {
+          if (active) setKeys(items);
+        })
+        .catch((err) => {
+          if (active) setError(errorMessage(err));
+        });
+    }
 
     return () => {
       active = false;
     };
   }, [canSign]);
 
-  function start(action: string) {
-    setBusy(action);
+  const ownedDocs = docList.filter(
+    (doc) => doc.is_owner || String(doc.owner_id) === String(user?.id),
+  );
+
+  async function generateKey() {
+    setBusy("generate");
     setError("");
     setMessage("");
-  }
-
-  async function generateKeys() {
-    start("generate");
 
     try {
-      // The private PEM is downloaded to the user's device.
-      const response = await signatures.generate("");
-
-      const id = String(
-        response.headers["x-signing-key-id"] || "",
-      ).trim();
+      const { file, keyId } = await signatures.generate();
 
       saveBlob(
-        response.data,
-        validUUID(id) ? `signing-${id}.pem` : "signing-private-key.pem",
+        file,
+        keyId ? `signing-${keyId}.pem` : "signing-private-key.pem",
       );
 
-      setMessage(
-        "Key created. Save the downloaded private PEM—you will need it to sign.",
-      );
+      setMessage("Signing key created. Keep the downloaded private PEM safe.");
 
-      // Refresh separately so a refresh failure doesn't misreport key creation.
       try {
         setKeys(await signatures.keys());
       } catch {
-        setError(
-          "The key was created, but the key list could not refresh. Reload the page before signing.",
-        );
+        setError("The key was created, but the key list could not refresh.");
       }
-    } catch (error) {
-      setError(errorMessage(error));
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy("");
     }
@@ -122,88 +85,38 @@ export default function Signatures() {
 
   async function signDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    const form = event.currentTarget;
-    start("sign");
+    setBusy("sign");
+    setError("");
+    setMessage("");
 
     try {
-      const id = documentId.trim();
+      const key = keys.find((item) => item.id === signingKeyId);
 
-      if (!validUUID(id)) {
-        throw new Error("Choose a document or enter its valid document ID.");
+      if (!key?.usable_for_signing) {
+        throw new Error("Select an active signing key.");
+      }
+      if (!originalFile || !privateKeyFile) {
+        throw new Error("Choose the original document and your private PEM.");
       }
 
-      if (!documentFile || !privateKeyFile) {
-        throw new Error("Choose the original document and private-key PEM.");
-      }
-
-      // Refresh key state before attempting a signature.
-      const currentKeys = await signatures.keys();
-      setKeys(currentKeys);
-
-      const activeKeys = currentKeys.filter(
-        (key) =>
-          key.usable_for_signing &&
-          key.algorithm === "RSA-PSS-SHA256",
+      const signature = await signLocally(
+        originalFile,
+        privateKeyFile,
+        key.public_key_pem,
       );
 
-      if (!activeKeys.length) {
-        throw new Error("Create an active signing key first.");
-      }
+      await signatures.submit(
+        signDocumentId.trim(),
+        key.id,
+        signature,
+      );
 
-      const filenameId = privateKeyFile.name.match(
-        /^signing-([0-9a-f-]{36})\.pem$/i,
-      )?.[1];
-
-      const candidates = [
-        ...activeKeys.filter((key) => key.id === filenameId),
-        ...activeKeys.filter((key) => key.id !== filenameId),
-      ];
-
-      let matchedKeyId = "";
-      let signature = "";
-
-      for (const key of candidates) {
-        try {
-          signature = await signLocally(
-            documentFile,
-            privateKeyFile,
-            key.public_key_pem,
-          );
-
-          matchedKeyId = key.id;
-          break;
-        } catch (error) {
-          const mismatch =
-            error instanceof Error &&
-            error.message.startsWith(
-              "This private PEM does not match the selected signing key.",
-            );
-
-          if (!mismatch) throw error;
-        }
-      }
-
-      if (!matchedKeyId) {
-        throw new Error(
-          "This PEM does not match any of your active signing keys.",
-        );
-      }
-
-      await signatures.submit(id, matchedKeyId, signature);
-
-      setMessage("Document signature verified and saved.");
-      setDocumentFile(null);
+      setMessage("Signature verified and saved.");
+      setOriginalFile(null);
       setPrivateKeyFile(null);
-      setResult(null);
-
-      form
-        .querySelectorAll<HTMLInputElement>('input[type="file"]')
-        .forEach((input) => {
-          input.value = "";
-        });
-    } catch (error) {
-      setError(errorMessage(error));
+      event.currentTarget.reset();
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy("");
     }
@@ -211,292 +124,222 @@ export default function Signatures() {
 
   async function verifyDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    start("verify");
+    setBusy("verify");
+    setError("");
+    setMessage("");
     setResult(null);
 
     try {
-      const id = verifyId.trim();
-
-      if (!validUUID(id)) {
-        throw new Error("Choose a document or enter its valid document ID.");
-      }
-
-      setResult(await signatures.verify(id));
-    } catch (error) {
-      setError(errorMessage(error));
+      setResult(await signatures.verify(verifyDocumentId.trim()));
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy("");
     }
   }
 
   return (
-    <>
-      <PageHeading
-        eyebrow="Documents"
-        title="Digital signatures"
-        description="Generate a key, sign a document, and verify its signature."
-      />
+    <main className="space-y-5 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-bold">Digital signatures</h1>
+        <p className="text-sm text-slate-500">
+          Generate a key, sign an uploaded document, and verify signatures.
+        </p>
+      </div>
 
-      <Alert message={error} />
-      <Alert message={message} success />
-
-      <datalist id="uploaded-documents">
-        {accessibleDocs.map((doc) => (
-          <option key={doc.id} value={doc.id}>
-            {doc.filename}
-          </option>
-        ))}
-
-        {receipts.map((receipt) => (
-          <option key={receipt.id} value={receipt.id}>
-            {receipt.filename}
-          </option>
-        ))}
-      </datalist>
+      {error && <p role="alert" className="text-red-700">{error}</p>}
+      {message && <p role="status" className="text-green-700">{message}</p>}
 
       {canSign && (
         <>
-          <Card>
-            <h2 className="section-heading">1. Generate keys</h2>
-
-            <p className="my-3 text-sm text-slate-500">
-              Your public key is saved on the server. Your private key
-              downloads as a PEM file—keep it safe on your device.
+          <section className={card}>
+            <h2 className="text-lg font-semibold">1. Generate a signing key</h2>
+            <p className="text-sm text-slate-600">
+              The public key stays on the server. Download and keep your
+              private PEM; the server does not store it.
             </p>
-
             <button
               type="button"
-              className="btn-primary"
+              className={button}
               disabled={Boolean(busy)}
-              onClick={generateKeys}
+              onClick={() => void generateKey()}
             >
-              {busy === "generate"
-                ? "Generating…"
-                : "Generate & download key"}
+              {busy === "generate" ? "Generating…" : "Generate and download key"}
             </button>
-          </Card>
+          </section>
 
-          <Card>
-            <h2 className="section-heading">2. Sign a document</h2>
+          <section className={card}>
+            <h2 className="text-lg font-semibold">2. Sign a document</h2>
 
-            <form onSubmit={signDocument}>
-              <fieldset
-                disabled={Boolean(busy)}
-                className="mt-4 max-w-2xl space-y-4"
-              >
-                {accessibleDocs.length > 0 && (
-                  <div>
-                    <label className="field-label">
-                      Choose Document to Sign
-                    </label>
-
-                    <select
-                      className="input-style mt-1.5"
-                      value={documentId}
-                      onChange={(event) => setDocumentId(event.target.value)}
-                    >
-                      <option value="">
-                        -- Select from your documents ({accessibleDocs.length}) --
+            <form className="max-w-xl space-y-4" onSubmit={signDocument}>
+              {ownedDocs.length > 0 && (
+                <label className="block space-y-1">
+                  <span>Choose your uploaded document</span>
+                  <select
+                    className={input}
+                    value={signDocumentId}
+                    onChange={(event) => setSignDocumentId(event.target.value)}
+                  >
+                    <option value="">Select a document</option>
+                    {ownedDocs.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.filename}
                       </option>
-
-                      {accessibleDocs.map((doc) => (
-                        <option key={doc.id} value={doc.id}>
-                          {doc.filename} — ID: {doc.id}
-                        </option>
-                      ))}
-                    </select>
-
-                    <p className="mt-1 text-xs text-slate-400">
-                      Or type/paste the document ID below.
-                    </p>
-                  </div>
-                )}
-
-                <label className="field-label">
-                  Document ID (UUID)
-                  <input
-                    className="input-style"
-                    list="uploaded-documents"
-                    placeholder="Choose or paste the document ID"
-                    value={documentId}
-                    onChange={(event) => setDocumentId(event.target.value)}
-                    required
-                  />
+                    ))}
+                  </select>
                 </label>
+              )}
 
-                <label className="field-label">
-                  Original document file
-                  <input
-                    className="input-style"
-                    type="file"
-                    accept=".pdf,.doc,.docx"
-                    onChange={(event) =>
-                      setDocumentFile(event.target.files?.[0] || null)
-                    }
-                    required
-                  />
-                </label>
+              <label className="block space-y-1">
+                <span>Document ID</span>
+                <input
+                  className={input}
+                  required
+                  placeholder="Paste the uploaded document ID"
+                  value={signDocumentId}
+                  onChange={(event) => setSignDocumentId(event.target.value)}
+                />
+              </label>
 
-                <label className="field-label">
-                  Private key
-                  <input
-                    className="input-style"
-                    type="file"
-                    accept=".pem"
-                    onChange={(event) =>
-                      setPrivateKeyFile(event.target.files?.[0] || null)
-                    }
-                    required
-                  />
-                </label>
-
-                <p className="text-xs text-slate-500">
-                  Choose the exact original file you uploaded. Signing happens
-                  in your browser; your private key is not uploaded.
-                </p>
-
-                <button
-                  className="btn-primary"
-                  disabled={Boolean(busy) || loadingKeys}
+              <label className="block space-y-1">
+                <span>Signing key</span>
+                <select
+                  className={input}
+                  required
+                  value={signingKeyId}
+                  onChange={(event) => setSigningKeyId(event.target.value)}
                 >
-                  {busy === "sign" ? "Signing…" : "Sign document"}
-                </button>
+                  <option value="">Select a key</option>
+                  {keys.filter((key) => key.usable_for_signing).map((key) => (
+                    <option key={key.id} value={key.id}>
+                      {key.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                {!loadingKeys &&
-                  !keys.some((key) => key.usable_for_signing) && (
-                    <p className="text-xs text-slate-500">
-                      Generate a signing key above before signing.
-                    </p>
-                  )}
-              </fieldset>
+              <label className="block space-y-1">
+                <span>Exact original file that was uploaded</span>
+                <input
+                  className={input}
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  required
+                  onChange={(event) =>
+                    setOriginalFile(event.target.files?.[0] ?? null)
+                  }
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span>Your private PEM file</span>
+                <input
+                  className={input}
+                  type="file"
+                  accept=".pem"
+                  required
+                  onChange={(event) =>
+                    setPrivateKeyFile(event.target.files?.[0] ?? null)
+                  }
+                />
+              </label>
+
+              <p className="text-sm text-slate-500">
+                Signing happens in your browser. Your private PEM is never
+                uploaded.
+              </p>
+
+              <button className={button} disabled={Boolean(busy)}>
+                {busy === "sign" ? "Signing…" : "Sign document"}
+              </button>
             </form>
-          </Card>
+          </section>
         </>
       )}
 
       {canVerify && (
-        <Card>
-          <h2 className="section-heading">
-            {canSign ? "3. Verify a document" : "Verify a document"}
+        <section className={card}>
+          <h2 className="text-lg font-semibold">
+            {canSign ? "3. Verify signatures" : "Verify signatures"}
           </h2>
 
-          <form onSubmit={verifyDocument}>
-            <fieldset
-              disabled={Boolean(busy)}
-              className="mt-4 max-w-2xl space-y-4"
-            >
-              {accessibleDocs.length > 0 && (
-                <div>
-                  <label className="field-label">
-                    Choose Document to Verify
-                  </label>
-
-                  <select
-                    className="input-style mt-1.5"
-                    value={verifyId}
-                    onChange={(event) => {
-                      setVerifyId(event.target.value);
-                      setResult(null);
-                    }}
-                  >
-                    <option value="">
-                      -- Select a document ({accessibleDocs.length} available) --
-                    </option>
-
-                    {accessibleDocs.map((doc) => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.filename} ({doc.classification}) — ID: {doc.id}
-                      </option>
-                    ))}
-                  </select>
-
-                  <p className="mt-1 text-xs text-slate-400">
-                    Or type/paste the document ID below.
-                  </p>
-                </div>
-              )}
-
-              <label className="field-label">
-                Document ID (UUID)
-                <input
-                  className="input-style"
-                  list="uploaded-documents"
-                  placeholder="Choose or paste the document ID"
-                  value={verifyId}
+          <form className="max-w-xl space-y-4" onSubmit={verifyDocument}>
+            {docList.length > 0 && (
+              <label className="block space-y-1">
+                <span>Choose a document</span>
+                <select
+                  className={input}
+                  value={verifyDocumentId}
                   onChange={(event) => {
-                    setVerifyId(event.target.value);
+                    setVerifyDocumentId(event.target.value);
                     setResult(null);
                   }}
-                  required
-                />
+                >
+                  <option value="">Select a document</option>
+                  {docList.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.filename}
+                    </option>
+                  ))}
+                </select>
               </label>
+            )}
 
-              <button className="btn-primary">
-                {busy === "verify" ? "Verifying…" : "Verify"}
-              </button>
-            </fieldset>
+            <label className="block space-y-1">
+              <span>Document ID</span>
+              <input
+                className={input}
+                required
+                placeholder="Paste a document ID"
+                value={verifyDocumentId}
+                onChange={(event) => {
+                  setVerifyDocumentId(event.target.value);
+                  setResult(null);
+                }}
+              />
+            </label>
+
+            <button className={button} disabled={Boolean(busy)}>
+              {busy === "verify" ? "Verifying…" : "Verify"}
+            </button>
           </form>
 
           {result && (
             <div className="mt-5 space-y-3 text-sm">
-              <p
-                className={
-                  result.document_integrity_valid
-                    ? "text-emerald-700"
-                    : "text-red-600"
-                }
-              >
-                {result.document_integrity_valid
-                  ? "Stored document integrity verified."
-                  : "Stored document integrity check failed."}
+              <p>
+                Document integrity:{" "}
+                <strong>
+                  {result.document_integrity_valid ? "Valid" : "Failed"}
+                </strong>
               </p>
 
-              {!result.has_signatures ? (
-                <p className="text-slate-500">
-                  This document has no recorded signatures.
-                </p>
-              ) : (
-                result.signatures.map((signature) => (
-                  <div
-                    key={signature.id}
-                    className="rounded-lg border border-slate-200 p-3"
-                  >
-                    <p
-                      className={
-                        signature.cryptographically_valid
-                          ? "font-medium text-emerald-700"
-                          : "font-medium text-red-600"
-                      }
-                    >
-                      {signature.cryptographically_valid
-                        ? "Signature valid"
-                        : "Signature invalid"}
-                    </p>
+              {!result.has_signatures && <p>No signatures recorded.</p>}
 
-                    <p className="mt-1 text-xs text-slate-500">
-                      Signer: {signature.signer_id} · Key status:{" "}
-                      {signature.key_status}
+              {result.signatures.map((signature) => (
+                <div key={signature.id} className="rounded border p-3">
+                  <p>
+                    Signature:{" "}
+                    <strong>
+                      {signature.cryptographically_valid ? "Valid" : "Invalid"}
+                    </strong>
+                  </p>
+                  <p>Signer ID: {signature.signer_id}</p>
+                  <p>Key status: {signature.key_status}</p>
+                  {!signature.key_usable_now && (
+                    <p className="text-amber-700">
+                      This key cannot be used for new signatures.
                     </p>
-
-                    {!signature.key_usable_now && (
-                      <p className="mt-1 text-xs text-amber-700">
-                        This key is no longer usable for new signatures.
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
+                  )}
+                </div>
+              ))}
             </div>
           )}
-        </Card>
+        </section>
       )}
 
       {!canSign && !canVerify && (
-        <p className="text-sm text-slate-500">
-          Your account does not have signing or verification permission.
-        </p>
+        <p>You do not have signing or verification permission.</p>
       )}
-    </>
+    </main>
   );
 }

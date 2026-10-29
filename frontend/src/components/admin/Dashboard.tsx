@@ -9,32 +9,32 @@ export default function Dashboard() {
     {
       to: "/workspace/admin/encryption",
       title: "Encryption Setup",
-      description: "Initialize the system encryption keys.",
+      description: "Initialize the document wrapping key.",
       icon: KeyRound,
-      show: can("crypto_keys.create"),
+      visible: can("crypto_keys.create"),
     },
     {
       to: "/workspace/sharing",
       title: "Document Sharing",
-      description: "Review accessible documents and sharing options.",
+      description: "View documents and manage access.",
       icon: Share2,
-      show: true,
+      visible: can("documents.read") || can("documents.share"),
     },
     {
       to: "/workspace/signatures",
       title: "Digital Signatures",
-      description: "Sign or verify documents where permitted.",
+      description: "Sign or verify documents.",
       icon: PenLine,
-      show: can("documents.sign") || can("documents.verify"),
+      visible: can("documents.sign") || can("documents.verify"),
     },
-  ].filter((action) => action.show);
+  ].filter((action) => action.visible);
 
   return (
-    <div className="space-y-6">
+    <main className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Admin Dashboard</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Welcome, {user?.email}. Manage system security and access.
+          Welcome, {user?.email}.
         </p>
       </div>
 
@@ -47,7 +47,9 @@ export default function Dashboard() {
 
         <div className="rounded-lg border bg-white p-5">
           <KeyRound className="mb-3 text-blue-600" size={24} />
-          <p className="text-sm text-slate-500">Encryption</p>
+          <p className="text-sm text-slate-500">
+            Document encryption algorithm
+          </p>
           <p className="mt-2 text-lg font-semibold">AES-256-GCM</p>
         </div>
       </div>
@@ -77,6 +79,6 @@ export default function Dashboard() {
           )}
         </div>
       </section>
-    </div>
+    </main>
   );
 }

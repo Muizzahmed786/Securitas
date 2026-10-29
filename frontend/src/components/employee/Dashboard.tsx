@@ -11,19 +11,19 @@ export default function Dashboard() {
       title: "Accessible Documents",
       description: "View documents shared with your account.",
       icon: Share2,
-      show: true,
+      visible: can("documents.read") || can("documents.verify"),
     },
     {
       to: "/workspace/signatures",
       title: "Digital Signatures",
       description: "Sign or verify documents where permitted.",
       icon: PenLine,
-      show: can("documents.sign") || can("documents.verify"),
+      visible: can("documents.sign") || can("documents.verify"),
     },
-  ].filter((action) => action.show);
+  ].filter((action) => action.visible);
 
   return (
-    <div className="space-y-6">
+    <main className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Employee Dashboard</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -34,7 +34,7 @@ export default function Dashboard() {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-lg border bg-white p-5">
           <FileText className="mb-3 text-blue-600" size={24} />
-          <p className="text-sm text-slate-500">Available permissions</p>
+          <p className="text-sm text-slate-500">Assigned permissions</p>
           <p className="mt-2 text-2xl font-bold">{permissions.length}</p>
         </div>
 
@@ -62,8 +62,14 @@ export default function Dashboard() {
               </div>
             </Link>
           ))}
+
+          {actions.length === 0 && (
+            <p className="text-sm text-slate-500">
+              No document tools are available for your permissions.
+            </p>
+          )}
         </div>
       </section>
-    </div>
+    </main>
   );
 }

@@ -9,32 +9,32 @@ export default function Dashboard() {
     {
       to: "/workspace/advisor/audit",
       title: "Audit Logs",
-      description: "Review available security events and audit records.",
+      description: "Review security events and audit records.",
       icon: Activity,
-      show: can("audit.read"),
+      visible: can("audit.read"),
     },
     {
       to: "/workspace/signatures",
       title: "Verify Signatures",
-      description: "Verify document signatures where permitted.",
+      description: "Check document integrity and signatures.",
       icon: PenLine,
-      show: can("documents.verify"),
+      visible: can("documents.verify"),
     },
     {
       to: "/workspace/sharing",
       title: "Accessible Documents",
       description: "View documents available to your account.",
       icon: Share2,
-      show: true,
+      visible: can("documents.read") || can("documents.verify"),
     },
-  ].filter((action) => action.show);
+  ].filter((action) => action.visible);
 
   return (
-    <div className="space-y-6">
+    <main className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Security Auditor Dashboard</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Welcome, {user?.email}. Review security and compliance activity.
+          Welcome, {user?.email}. Review security activity.
         </p>
       </div>
 
@@ -79,6 +79,6 @@ export default function Dashboard() {
           )}
         </div>
       </section>
-    </div>
+    </main>
   );
 }

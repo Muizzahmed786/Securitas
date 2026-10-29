@@ -9,28 +9,28 @@ export default function Dashboard() {
     {
       to: "/workspace/owner/upload",
       title: "Upload Document",
-      description: "Upload and securely encrypt a document.",
+      description: "Upload and encrypt a document.",
       icon: Upload,
-      show: can("documents.upload"),
+      visible: can("documents.upload"),
     },
     {
       to: "/workspace/sharing",
       title: "Manage Document Sharing",
-      description: "View accessible documents and sharing options.",
+      description: "View documents and manage their access grants.",
       icon: Share2,
-      show: true,
+      visible: can("documents.read") || can("documents.verify"),
     },
     {
       to: "/workspace/signatures",
       title: "Digital Signatures",
       description: "Sign or verify documents where permitted.",
       icon: PenLine,
-      show: can("documents.sign") || can("documents.verify"),
+      visible: can("documents.sign") || can("documents.verify"),
     },
-  ].filter((action) => action.show);
+  ].filter((action) => action.visible);
 
   return (
-    <div className="space-y-6">
+    <main className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Owner Dashboard</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -64,7 +64,7 @@ export default function Dashboard() {
 
           {actions.length === 0 && (
             <p className="text-sm text-slate-500">
-              No document actions are currently available.
+              No document actions are available for your permissions.
             </p>
           )}
         </div>
@@ -85,10 +85,8 @@ export default function Dashboard() {
                   <p className="truncate text-sm font-medium">
                     {receipt.filename}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {receipt.created_at
-                      ? new Date(receipt.created_at).toLocaleString()
-                      : "Recently uploaded"}
+                  <p className="mt-1 break-all text-xs text-slate-500">
+                    ID: {receipt.id}
                   </p>
                 </li>
               ))}
@@ -96,6 +94,6 @@ export default function Dashboard() {
           )}
         </section>
       )}
-    </div>
+    </main>
   );
 }

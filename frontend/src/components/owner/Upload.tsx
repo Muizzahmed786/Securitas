@@ -1,262 +1,230 @@
-import { useRef, useState } from "react";
-import type { FormEvent, DragEvent } from "react";
+import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { CloudUpload, FileText, Download, X } from "lucide-react";
 import {
-  CloudUpload,
-  FileText,
-  ShieldCheck,
-  Upload as UploadIcon,
-  CheckCircle2,
-  X,
-  Download,
-} from "lucide-react";
-import { uploadDocument, errorMessage, saveBlob } from "../api/client";
-import type { UploadReceipt } from "../api/client";
-import { useAuth } from "../context/AuthContext";
-import {
-  Alert,
-  Card,
-  PageHeading,
-  CopyId,
-  Empty,
-  Spinner,
-  formatDate,
-  formatSize,
-} from "../components/UI";
+  uploadDocument,
+  saveBlob,
+  type UploadReceipt,
+} from "../../api/documents";
+import { errorMessage } from "../../api/http";
+import { useAuth } from "../../context/AuthContext";
+
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+function formatSize(bytes: number) {
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 export default function Upload() {
   const { receipts, addReceipt } = useAuth();
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const [file, setFile] = useState<File | null>(null);
-  const [dragging, setDragging] = useState(false);
   const [classification, setClassification] = useState("INTERNAL");
+  const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const input = useRef<HTMLInputElement>(null);
-  function choose(selected?: File) {
-    if (!selected) return;
-    setSuccess("");
+
+  function chooseFile(selected?: File) {
+    setFile(null);
     setError("");
+    setSuccess("");
+
+    if (!selected) return;
+
     if (!/\.(pdf|doc|docx)$/i.test(selected.name)) {
-      setError("Choose a PDF, DOC or DOCX document.");
+      setError("Choose a PDF, DOC, or DOCX document.");
       return;
     }
-    if (!selected.size || selected.size > 20 * 1024 * 1024) {
+
+    if (selected.size === 0 || selected.size > MAX_FILE_SIZE) {
       setError("Choose a nonempty document no larger than 20 MiB.");
       return;
     }
+
     setFile(selected);
   }
-  function drop(event: DragEvent) {
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragging(false);
-    if (!busy) choose(event.dataTransfer.files[0]);
+
+    if (busy) return;
+
+    const selected = event.dataTransfer.files[0];
+    chooseFile(selected);
+
+    // A previously selected file in the input must not remain there.
+    if (inputRef.current) inputRef.current.value = "";
   }
-  async function submit(event: FormEvent) {
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) return;
+
     setBusy(true);
     setError("");
     setSuccess("");
+
     try {
       const receipt = await uploadDocument(file, classification);
       addReceipt(receipt);
       setFile(null);
-      if (input.current) input.current.value = "";
+
+      if (inputRef.current) inputRef.current.value = "";
+
       setSuccess(
-        "Your document was uploaded and encrypted successfully. Save its receipt to keep the document ID.",
+        "Document uploaded and encrypted. Save the receipt to keep its ID.",
       );
-    } catch (e) {
-      setError(errorMessage(e));
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
   }
-  function exportReceipt(receipt: UploadReceipt) {
-    saveBlob(
-      new Blob([JSON.stringify(receipt, null, 2)], {
-        type: "application/json",
-      }),
-      `receipt-${receipt.id}.json`,
-    );
+
+  function saveReceipt(receipt: UploadReceipt) {
+    const blob = new Blob([JSON.stringify(receipt, null, 2)], {
+      type: "application/json",
+    });
+
+    saveBlob(blob, `receipt-${receipt.id}.json`);
   }
+
   return (
-    <>
-      <PageHeading
-        eyebrow="Document protection"
-        title="Upload a document"
-        description="Store a PDF or Word document with AES encryption and an RSA-protected encryption key."
-      />
-      <Alert message={error} />
-      <Alert message={success} success />
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <form className="space-y-5" onSubmit={submit}>
-            <div
-              className={`relative flex min-h-56 flex-col items-center justify-center rounded-xl border-2 border-dashed p-7 text-center transition ${dragging ? "border-indigo-400 bg-indigo-50" : "border-blue-200 bg-blue-50/20 hover:bg-blue-50/50"}`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (!busy) setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={drop}
-            >
-              <input
-                ref={input}
-                aria-label="Choose document"
-                type="file"
-                accept=".pdf,.doc,.docx"
-                disabled={busy}
-                onChange={(e) => choose(e.target.files?.[0])}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              />
-              <span className="mb-4 rounded-2xl bg-blue-100/70 p-4 text-blue-600">
-                <CloudUpload size={32} />
-              </span>
-              <h2 className="font-semibold text-slate-700">
-                Click to choose or drag & drop
-              </h2>
-              <p className="mt-2 text-sm text-slate-400">
-                PDF, DOC and DOCX · Maximum 20 MiB
+    <main className="space-y-6 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-bold">Upload a document</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Upload a PDF or Word document for encrypted storage.
+        </p>
+      </div>
+
+      {error && <p role="alert" className="text-red-700">{error}</p>}
+      {success && <p role="status" className="text-green-700">{success}</p>}
+
+      <form
+        className="max-w-2xl space-y-5 rounded-lg border bg-white p-5"
+        onSubmit={submit}
+      >
+        <div
+          className={`rounded-lg border-2 border-dashed p-6 text-center ${
+            dragging ? "border-blue-500 bg-blue-50" : "border-slate-300"
+          }`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (!busy) setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+        >
+          <CloudUpload size={32} className="mx-auto text-blue-600" />
+          <p className="mt-2 font-medium">Choose a file or drag it here</p>
+          <p className="mt-1 text-sm text-slate-500">
+            PDF, DOC, or DOCX · Maximum 20 MiB
+          </p>
+
+          <input
+            ref={inputRef}
+            className="mt-4 block w-full text-sm"
+            aria-label="Choose document"
+            type="file"
+            accept=".pdf,.doc,.docx"
+            disabled={busy}
+            onChange={(event) => chooseFile(event.target.files?.[0])}
+          />
+        </div>
+
+        {file && (
+          <div className="flex items-center gap-3 rounded-lg border p-3">
+            <FileText size={20} className="shrink-0 text-blue-600" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">{file.name}</p>
+              <p className="text-sm text-slate-500">
+                {formatSize(file.size)}
               </p>
             </div>
-            {file && (
-              <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/30 p-4">
-                <FileText className="shrink-0 text-blue-500" size={24} />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-700">
-                    {file.name}
+            <button
+              type="button"
+              aria-label="Remove selected file"
+              disabled={busy}
+              onClick={() => {
+                setFile(null);
+                if (inputRef.current) inputRef.current.value = "";
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">Classification</span>
+          <select
+            className="w-full rounded border px-3 py-2"
+            value={classification}
+            disabled={busy}
+            onChange={(event) => setClassification(event.target.value)}
+          >
+            <option value="PUBLIC">Public</option>
+            <option value="INTERNAL">Internal</option>
+            <option value="CONFIDENTIAL">Confidential</option>
+            <option value="RESTRICTED">Restricted</option>
+          </select>
+        </label>
+
+        <button
+          className="rounded bg-blue-600 px-4 py-2 font-medium text-white disabled:opacity-50"
+          disabled={busy || !file}
+        >
+          {busy ? "Uploading and encrypting…" : "Upload document"}
+        </button>
+      </form>
+
+      <section className="rounded-lg border bg-white p-5">
+        <h2 className="text-lg font-semibold">Upload Receipts</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          These receipts are kept for this session. Save one if you need its
+          document ID later.
+        </p>
+
+        {receipts.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">
+            No uploads during this session.
+          </p>
+        ) : (
+          <ul className="mt-4 divide-y">
+            {receipts.map((receipt) => (
+              <li
+                key={receipt.id}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <div>
+                  <p className="font-medium">{receipt.filename}</p>
+                  <p className="break-all text-xs text-slate-500">
+                    ID: {receipt.id}
                   </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {formatSize(file.size)}
+                  <p className="text-xs text-slate-500">
+                    {receipt.classification} ·{" "}
+                    {receipt.created_at
+                      ? new Date(receipt.created_at).toLocaleString()
+                      : "Recently uploaded"}
                   </p>
                 </div>
+
                 <button
                   type="button"
-                  disabled={busy}
-                  aria-label="Remove selected document"
-                  className="ml-auto p-2 text-slate-400"
-                  onClick={() => {
-                    setFile(null);
-                    if (input.current) input.current.value = "";
-                  }}
+                  className="flex items-center gap-2 rounded border px-3 py-2 text-sm"
+                  onClick={() => saveReceipt(receipt)}
                 >
-                  <X size={18} />
+                  <Download size={16} />
+                  Save receipt
                 </button>
-              </div>
-            )}
-            <label className="field-label">
-              Document classification
-              <select
-                className="input-style"
-                value={classification}
-                disabled={busy}
-                onChange={(e) => setClassification(e.target.value)}
-              >
-                {["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"].map(
-                  (value) => (
-                    <option key={value}>{value}</option>
-                  ),
-                )}
-              </select>
-            </label>
-            <button className="btn-primary w-full" disabled={busy || !file}>
-              {busy ? <Spinner /> : <UploadIcon size={17} />}
-              {busy ? "Uploading & encrypting…" : "Encrypt & upload"}
-            </button>
-          </form>
-        </Card>
-        <Card>
-          <ShieldCheck size={28} className="mb-4 text-blue-600" />
-          <h2 className="section-heading">What happens to your file?</h2>
-          <div className="mt-5 space-y-5">
-            {[
-              [
-                "01",
-                "Validate",
-                "The server checks the file format, size and classification.",
-              ],
-              [
-                "02",
-                "Encrypt",
-                "A fresh encryption key protects the document contents.",
-              ],
-              [
-                "03",
-                "Store",
-                "Ciphertext is saved while metadata stays in the database.",
-              ],
-            ].map(([number, title, description]) => (
-              <div key={number} className="flex gap-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[11px] font-bold text-blue-600">
-                  {number}
-                </span>
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-700">
-                    {title}
-                  </h3>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">
-                    {description}
-                  </p>
-                </div>
-              </div>
+              </li>
             ))}
-          </div>
-        </Card>
-      </div>
-      <Card>
-        <h2 className="section-heading">Upload receipts</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-400">
-          Receipts shown here belong to this browser session. Save one to retain
-          the document ID for signing or verification.
-        </p>
-        {receipts.length ? (
-          <div className="mt-5 overflow-x-auto">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Document</th>
-                  <th>Classification</th>
-                  <th>Uploaded</th>
-                  <th>Receipt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {receipts.map((receipt) => (
-                  <tr key={receipt.id}>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2
-                          size={17}
-                          className="shrink-0 text-emerald-500"
-                        />
-                        <strong>{receipt.filename}</strong>
-                      </div>
-                      <CopyId value={receipt.id} />
-                    </td>
-                    <td>
-                      <span className="badge">{receipt.classification}</span>
-                    </td>
-                    <td>{formatDate(receipt.created_at)}</td>
-                    <td>
-                      <button
-                        className="btn-secondary"
-                        onClick={() => exportReceipt(receipt)}
-                      >
-                        <Download size={15} />
-                        Save receipt
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <Empty
-            title="No upload receipts yet"
-            description="Successfully uploaded documents will appear here."
-          />
+          </ul>
         )}
-      </Card>
-    </>
+      </section>
+    </main>
   );
 }
