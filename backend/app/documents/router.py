@@ -1,11 +1,9 @@
-"""Validated document uploads, encrypted storage, controlled sharing, and retrieval."""
-
 import io
-import json
 import logging
 import os
 import zipfile
 from pathlib import Path
+from typing import Any, Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
@@ -28,6 +26,7 @@ from app.signatures.crypto import decrypt_document, verify_signature
 from app.risk.schemas import RiskContext
 from app.risk.service import evaluate_risk, consume_step_up_token
 from app.audit.service import log_audit_event
+from app.search.service import prepare_index, save_upload_index
 
 
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
@@ -112,7 +111,7 @@ def validate_document(filename: str, data: bytes):
                 )
                 if not valid:
                     raise ApiError(415, "File does not appear to be a Word DOC")
-        except (olefile.OleFileError, OSError, ValueError) as error:
+        except (OSError, ValueError) as error:
             raise ApiError(415, "Invalid DOC file") from error
 
     return filename, MIME_TYPES[extension]
@@ -229,7 +228,7 @@ def write_encrypted_file(path: Path, ciphertext: bytes):
         raise
 
 
-async def authorized_document(db, document_id: UUID, user: dict, required_permission: str = None):
+async def authorized_document(db, document_id: UUID, user: dict, required_permission: str = ""):
     result = await db.execute(
         text("SELECT * FROM documents WHERE id = :id AND deleted_at IS NULL FOR SHARE"),
         {"id": document_id}
@@ -299,7 +298,7 @@ async def upload_document(
     request_id = uuid4()
     file_written = False
     commit_attempted = False
-    storage_path = None
+    storage_path: Optional[Path] = None
 
     try:
         user_id = user["id"]
@@ -315,6 +314,7 @@ async def upload_document(
             encrypt_document, data, wrapping_key["public_key_pem"], document_id
         )
         file_size = len(data)
+        prepared_search = await prepare_index(db, data, filename)
         del data
 
         await run_in_threadpool(
@@ -355,6 +355,13 @@ async def upload_document(
             },
         )
         created_at = result.scalar_one()
+        search_status = await save_upload_index(db, document_id, prepared_search)
+        del prepared_search
+
+        # Mark before commit: an uncertain commit outcome must never delete the file.
+        # The audit helper also commits; persist the document/index first.
+        commit_attempted = True
+        await db.commit()
 
         await log_audit_event(
             db,
@@ -365,15 +372,13 @@ async def upload_document(
             request_id=request_id,
             metadata={"filename": filename, "classification": classification, "file_size": file_size}
         )
-        commit_attempted = True
-        await db.commit()
 
     except BaseException as error:
         try:
             await db.rollback()
         except Exception:
             logger.exception("Failed to roll back document upload")
-        if file_written and not commit_attempted:
+        if file_written and not commit_attempted and storage_path is not None:
             try:
                 await run_in_threadpool(storage_path.unlink, missing_ok=True)
             except Exception:
@@ -397,6 +402,7 @@ async def upload_document(
             "file_size_bytes": file_size,
             "classification": classification,
             "created_at": created_at.isoformat(),
+            "search_status": search_status,
         },
         "Document uploaded and encrypted successfully",
     )
@@ -484,7 +490,7 @@ async def get_document_metadata(
 async def download_document(
     document_id: str,
     request: Request,
-    step_up_token: str = Header(None, alias="X-Step-Up-Token"),
+    step_up_token: Optional[str] = Header(None, alias="X-Step-Up-Token"),
     user=Depends(require_permission("documents.download")),
     db=Depends(get_db),
 ):
@@ -502,7 +508,7 @@ async def download_document(
         timestamp=datetime.now(timezone.utc),
         ip_address=request.client.host if request.client else "127.0.0.1",
         user_agent=request.headers.get("user-agent"),
-        session_id=UUID(user.get("session_id")) if user.get("session_id") else None,
+        session_id=UUID(str(user["session_id"])) if user.get("session_id") else None,
     )
 
     risk_result, plain_otp = await evaluate_risk(context, db, request_id=request_id)
@@ -535,7 +541,7 @@ async def download_document(
                 request_id=request_id,
                 metadata={"challenge_id": str(risk_result.step_up_challenge_id), "risk_score": risk_result.risk_score}
             )
-            challenge_err_data = {
+            challenge_err_data: dict[str, Any] = {
                 "step_up_required": True,
                 "challenge_id": str(risk_result.step_up_challenge_id),
                 "risk_score": risk_result.risk_score,
@@ -602,7 +608,7 @@ async def download_document(
 async def view_document(
     document_id: str,
     request: Request,
-    step_up_token: str = Header(None, alias="X-Step-Up-Token"),
+    step_up_token: Optional[str] = Header(None, alias="X-Step-Up-Token"),
     user=Depends(require_permission("documents.read")),
     db=Depends(get_db),
 ):
@@ -620,7 +626,7 @@ async def view_document(
         timestamp=datetime.now(timezone.utc),
         ip_address=request.client.host if request.client else "127.0.0.1",
         user_agent=request.headers.get("user-agent"),
-        session_id=UUID(user.get("session_id")) if user.get("session_id") else None,
+        session_id=UUID(str(user["session_id"])) if user.get("session_id") else None,
     )
 
     risk_result, plain_otp = await evaluate_risk(context, db, request_id=request_id)
@@ -652,7 +658,7 @@ async def view_document(
                 request_id=request_id,
                 metadata={"challenge_id": str(risk_result.step_up_challenge_id), "risk_score": risk_result.risk_score}
             )
-            challenge_err_data = {
+            challenge_err_data: dict[str, Any] = {
                 "step_up_required": True,
                 "challenge_id": str(risk_result.step_up_challenge_id),
                 "risk_score": risk_result.risk_score,
@@ -777,7 +783,7 @@ async def verify_document(
             get_upload_directory(),
         )
         integrity_valid = True
-    except Exception as e:
+    except Exception:
         integrity_valid = False
         plaintext = None
 
@@ -798,7 +804,7 @@ async def verify_document(
     sigs = []
     for row in signatures_res.mappings().all():
         valid = False
-        if integrity_valid and plaintext:
+        if integrity_valid and plaintext is not None:
             try:
                 valid = await run_in_threadpool(
                     verify_signature,
@@ -923,6 +929,8 @@ async def share_document(
         }
     )
     access_row = res.mappings().first()
+    if access_row is None:
+        raise ApiError(500, "Could not create document access grant")
 
     await log_audit_event(
         db,
@@ -986,6 +994,8 @@ async def revoke_document_share(
             {"doc_id": doc_uuid, "target_id": int(target_user_id), "user_id": user["id"]}
         )
     else:
+        if access_id is None:
+            raise ApiError(400, "access_id is required")
         res = await db.execute(
             text("""
                 UPDATE document_access

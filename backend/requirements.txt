@@ -16,3 +16,5 @@ httpx
 bcrypt
 olefile
 pycryptodomex
+pypdf
+defusedxml
