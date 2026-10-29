@@ -3,61 +3,86 @@ import type { ReactNode } from "react";
 import { AuthContext } from "./AuthContext";
 import { auth, errorMessage } from "../api/client";
 import type { User, Permission, UploadReceipt } from "../api/client";
-export default function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setIdentity] = useState<User | null>(null);
+
+export default function AuthProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const [user, setUser] = useState<User | null>(null);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [permissionError, setPermissionError] = useState("");
   const [receipts, setReceipts] = useState<UploadReceipt[]>([]);
-  const setUser = useCallback((next: User | null) => {
-    setIdentity(next);
-    setPermissionsLoading(!!next);
+
+  const fetchUser = useCallback(async () => {
+    try {
+      const identity = await auth.current();
+      setUser(identity);
+    } catch {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const reloadPermissions = useCallback(async () => {
+    if (!user) {
+      setPermissions([]);
+      setPermissionsLoading(false);
+      return;
+    }
+
+    setPermissionsLoading(true);
+
+    try {
+      const result = await auth.permissions();
+      setPermissions(result);
+      setPermissionError("");
+    } catch (error) {
+      setPermissions([]);
+      setPermissionError(errorMessage(error));
+    } finally {
+      setPermissionsLoading(false);
+    }
+  }, [user]);
+
+  const handleSessionExpired = useCallback(() => {
+    setUser(null);
     setPermissions([]);
+    setPermissionsLoading(false);
     setPermissionError("");
     setReceipts([]);
   }, []);
-  const reloadPermissions = useCallback(async () => {
-  if (!user) {
-    setPermissions([]);
-    return;
-  }
 
-  setPermissionsLoading(true);
-  try {
-    setPermissions(await auth.permissions());
-    setPermissionError("");
-  } catch (error) {
-    setPermissions([]);
-    setPermissionError(errorMessage(error));
-  } finally {
-    setPermissionsLoading(false);
-  }
-}, [user]);
   useEffect(() => {
-    let active = true;
-    auth
-      .current()
-      .then((identity) => {
-        if (active) {
-          setIdentity(identity);
-          setPermissionsLoading(true);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    const expired = () => setUser(null);
-    window.addEventListener("securitas-session-expired", expired);
+    void fetchUser();
+
+    window.addEventListener(
+      "securitas-session-expired",
+      handleSessionExpired
+    );
+
     return () => {
-      active = false;
-      window.removeEventListener("securitas-session-expired", expired);
+      window.removeEventListener(
+        "securitas-session-expired",
+        handleSessionExpired
+      );
     };
-  }, [setUser]);
+  }, [fetchUser, handleSessionExpired]);
+
   useEffect(() => {
-    if (user) void reloadPermissions();
-  }, [user, reloadPermissions]);
+    void reloadPermissions();
+  }, [reloadPermissions]);
+
+  const can = (name: string) =>
+    permissions.some((permission) => permission.name === name);
+
+  const addReceipt = (receipt: UploadReceipt) => {
+    setReceipts((previous) => [receipt, ...previous]);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -69,10 +94,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         receipts,
         setUser,
         reloadPermissions,
-        can: (name) =>
-          permissions.some((permission) => permission.name === name),
-        addReceipt: (receipt) =>
-          setReceipts((previous) => [receipt, ...previous]),
+        can,
+        addReceipt,
       }}
     >
       {children}

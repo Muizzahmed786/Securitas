@@ -124,7 +124,38 @@ export type AuditStats = {
   high_risk_events?: number;
   total_documents?: number;
   active_shares?: number;
-  [key: string]: number | undefined;
+
+  total_audit_events?: number;
+
+  status_breakdown?: {
+    SUCCESS?: number;
+    CHALLENGED?: number;
+    DENIED?: number;
+    FAILURE?: number;
+  };
+
+  risk_distribution?: {
+    LOW?: number;
+    MEDIUM?: number;
+    HIGH?: number;
+    CRITICAL?: number;
+  };
+
+  [key: string]:
+    | number
+    | {
+        SUCCESS?: number;
+        CHALLENGED?: number;
+        DENIED?: number;
+        FAILURE?: number;
+      }
+    | {
+        LOW?: number;
+        MEDIUM?: number;
+        HIGH?: number;
+        CRITICAL?: number;
+      }
+    | undefined;
 };
 
 type RetryableRequestConfig = AxiosRequestConfig & {
