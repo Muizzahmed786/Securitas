@@ -1,80 +1,110 @@
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
-import { Link, Navigate, Route, Routes } from "react-router-dom";
-
-import Layout from "../components/Layout";
-import Auth from "../pages/Auth";
-import Dashboard from "../pages/Dashboard";
-import Upload from "../pages/Upload";
-import Signatures from "../pages/Signatures";
-import Keys from "../pages/Keys";
-import Profile from "../pages/Profile";
 import Landing from "../pages/Landing";
-import Sharing from "../pages/Sharing";
-import Audit from "../pages/Audit";
+import Login from "../pages/Login";
+import Register from "../pages/Register";
+import NotFound from "../pages/NotFound";
+import Profile from "../pages/Profile";
 
 import ProtectedRoute from "./ProtectedRoute";
+import Layout from "../components/ui/Layout";
+
+import AdminDashboard from "../components/admin/Dashboard";
+import EncryptionSetup from "../components/admin/EncryptionSetup";
+import OwnerDashboard from "../components/owner/Dashboard";
+import Upload from "../components/owner/Upload";
+import EmployeeDashboard from "../components/employee/Dashboard";
+import AdvisorDashboard from "../components/advisor/Dashboard";
+import Audit from "../components/advisor/Audit";
+import Sharing from "../components/documents/Sharing";
+import Signatures from "../components/documents/Signatures";
+
+function DashboardForRole() {
+  const { user, permissionsLoading } = useAuth();
+
+  if (permissionsLoading) {
+    return <p>Loading permissions…</p>;
+  }
+
+  switch (user?.role.toUpperCase()) {
+    case "ADMIN":
+      return <AdminDashboard />;
+
+    case "OWNER":
+    case "DOCUMENT_OWNER":
+      return <OwnerDashboard />;
+
+    case "EMPLOYEE":
+      return <EmployeeDashboard />;
+
+    case "SECURITY_AUDITOR":
+    case "ADVISOR":
+      return <AdvisorDashboard />;
+
+    default:
+      return <p>Your account does not have a recognized role.</p>;
+  }
+}
 
 export default function AppRoutes() {
   return (
     <Routes>
+      {/* Public routes */}
       <Route path="/" element={<Navigate to="/home" replace />} />
       <Route path="/home" element={<Landing />} />
-      <Route path="/login" element={<Auth />} />
-      <Route path="/register" element={<Auth register />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
-      {/* Redirect legacy URLs to their workspace equivalents. */}
-      <Route
-        path="/sharing"
-        element={<Navigate to="/workspace/sharing" replace />}
-      />
-      <Route
-        path="/documents"
-        element={<Navigate to="/workspace/sharing" replace />}
-      />
-      <Route
-        path="/audit"
-        element={<Navigate to="/workspace/audit" replace />}
-      />
-      <Route
-        path="/dashboard"
-        element={<Navigate to="/workspace/dashboard" replace />}
-      />
-      <Route
-        path="/upload"
-        element={<Navigate to="/workspace/upload" replace />}
-      />
-      <Route
-        path="/signatures"
-        element={<Navigate to="/workspace/signatures" replace />}
-      />
-      <Route
-        path="/keys"
-        element={<Navigate to="/workspace/keys" replace />}
-      />
-      <Route
-        path="/profile"
-        element={<Navigate to="/workspace/profile" replace />}
-      />
-
+      {/* Authenticated workspace */}
       <Route element={<ProtectedRoute />}>
         <Route path="/workspace" element={<Layout />}>
-          <Route
-            index
-            element={<Navigate to="dashboard" replace />}
-          />
-
-          <Route path="dashboard" element={<Dashboard />} />
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<DashboardForRole />} />
           <Route path="profile" element={<Profile />} />
-          <Route path="sharing" element={<Sharing />} />
 
+          {/* Admin feature */}
+          <Route
+            element={
+              <ProtectedRoute permissions={["crypto_keys.create"]} />
+            }
+          >
+            <Route
+              path="admin/encryption"
+              element={<EncryptionSetup />}
+            />
+          </Route>
+
+          {/* Owner feature */}
           <Route
             element={
               <ProtectedRoute permissions={["documents.upload"]} />
             }
           >
-            <Route path="upload" element={<Upload />} />
+            <Route path="owner/upload" element={<Upload />} />
           </Route>
 
+          {/* Auditor feature */}
+          <Route
+            element={
+              <ProtectedRoute permissions={["audit.read"]} />
+            }
+          >
+            <Route path="advisor/audit" element={<Audit />} />
+          </Route>
+
+          {/* Shared document list */}
+          <Route
+            element={
+              <ProtectedRoute
+                permissions={["documents.read", "documents.verify"]}
+              />
+            }
+          >
+            <Route path="sharing" element={<Sharing />} />
+          </Route>
+
+          {/* Shared signing and verification */}
           <Route
             element={
               <ProtectedRoute
@@ -85,38 +115,42 @@ export default function AppRoutes() {
             <Route path="signatures" element={<Signatures />} />
           </Route>
 
+          {/* Keep the old role URLs working */}
           <Route
-            element={
-              <ProtectedRoute permissions={["crypto_keys.create"]} />
-            }
+            element={<ProtectedRoute allowedRoles={["ADMIN"]} />}
           >
-            <Route path="keys" element={<Keys />} />
+            <Route path="admin" element={<AdminDashboard />} />
           </Route>
 
           <Route
             element={
-              <ProtectedRoute permissions={["audit.read"]} />
+              <ProtectedRoute
+                allowedRoles={["OWNER", "DOCUMENT_OWNER"]}
+              />
             }
           >
-            <Route path="audit" element={<Audit />} />
+            <Route path="owner" element={<OwnerDashboard />} />
+          </Route>
+
+          <Route
+            element={<ProtectedRoute allowedRoles={["EMPLOYEE"]} />}
+          >
+            <Route path="employee" element={<EmployeeDashboard />} />
+          </Route>
+
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={["SECURITY_AUDITOR", "ADVISOR"]}
+              />
+            }
+          >
+            <Route path="advisor" element={<AdvisorDashboard />} />
           </Route>
         </Route>
       </Route>
 
-      <Route
-        path="*"
-        element={
-          <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-blue-50">
-            <h1 className="text-3xl font-bold text-slate-800">
-              Page not found
-            </h1>
-
-            <Link to="/home" className="btn-primary">
-              Back to home
-            </Link>
-          </div>
-        }
-      />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }
