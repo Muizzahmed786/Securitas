@@ -1,13 +1,20 @@
 import logging
 import os
+import time
+import statistics
 from pathlib import Path
 from uuid import uuid4
 
+from Cryptodome.Cipher import AES, PKCS1_OAEP
+from Cryptodome.Hash import SHA256
 from Cryptodome.PublicKey import RSA
+from Cryptodome.Random import get_random_bytes
+from Cryptodome.Signature import pss
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text
 
+from app.auth.router import verify_jwt
 from app.database import get_db
 from app.rbac.dependency import require_permission
 from app.utils.ApiError import ApiError
@@ -65,6 +72,107 @@ def write_private_key(path: Path, private_pem: bytes):
     except BaseException:
         path.unlink(missing_ok=True)
         raise
+
+
+def benchmark_cryptography():
+    """Benchmark pure CPU cryptographic operations across file sizes up to upload limit."""
+    rsa_key = RSA.generate(2048)
+    rsa_pub = rsa_key.publickey()
+
+    sizes = [64 * 1024, 512 * 1024, 2 * 1024 * 1024, 8 * 1024 * 1024]
+    aes_metrics = []
+
+    for size in sizes:
+        data = os.urandom(size)
+        enc_times = []
+        dec_times = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            dek = get_random_bytes(32)
+            nonce = get_random_bytes(12)
+            cipher = AES.new(dek, AES.MODE_GCM, nonce=nonce, mac_len=16)
+            ct, tag = cipher.encrypt_and_digest(data)
+            enc_times.append((time.perf_counter() - t0) * 1000)
+
+            t0 = time.perf_counter()
+            dec_cipher = AES.new(dek, AES.MODE_GCM, nonce=nonce, mac_len=16)
+            _ = dec_cipher.decrypt_and_verify(ct, tag)
+            dec_times.append((time.perf_counter() - t0) * 1000)
+
+        mean_enc = statistics.mean(enc_times)
+        mean_dec = statistics.mean(dec_times)
+        aes_metrics.append({
+            "size_bytes": size,
+            "size_label": f"{size // 1024} KB" if size < 1024 * 1024 else f"{size // (1024 * 1024)} MB",
+            "encrypt_ms": round(mean_enc, 3),
+            "decrypt_ms": round(mean_dec, 3),
+            "encrypt_throughput_mb_s": round((size / (1024 * 1024)) / (mean_enc / 1000), 1) if mean_enc > 0 else 0,
+            "decrypt_throughput_mb_s": round((size / (1024 * 1024)) / (mean_dec / 1000), 1) if mean_dec > 0 else 0,
+        })
+
+    wrap_times = []
+    unwrap_times = []
+    for _ in range(3):
+        dek = get_random_bytes(32)
+        t0 = time.perf_counter()
+        wrapped = PKCS1_OAEP.new(rsa_pub, hashAlgo=SHA256).encrypt(dek)
+        wrap_times.append((time.perf_counter() - t0) * 1000)
+
+        t0 = time.perf_counter()
+        _ = PKCS1_OAEP.new(rsa_key, hashAlgo=SHA256).decrypt(wrapped)
+        unwrap_times.append((time.perf_counter() - t0) * 1000)
+
+    sign_times = []
+    verify_times = []
+    for _ in range(3):
+        digest = SHA256.new(b"benchmark document digest payload")
+        t0 = time.perf_counter()
+        sig = pss.new(rsa_key).sign(digest)
+        sign_times.append((time.perf_counter() - t0) * 1000)
+
+        t0 = time.perf_counter()
+        try:
+            pss.new(rsa_pub).verify(digest, sig)
+            verify_times.append((time.perf_counter() - t0) * 1000)
+        except Exception:
+            pass
+
+    return {
+        "iterations": 3,
+        "payload_limit_bytes": 20 * 1024 * 1024,
+        "tested_sizes": aes_metrics,
+        "key_wrapping_rsa_oaep": {
+            "payload": "32-byte AES DEK",
+            "key_size_bits": 2048,
+            "wrap_ms": round(statistics.mean(wrap_times), 3),
+            "unwrap_ms": round(statistics.mean(unwrap_times), 3),
+            "note": "RSA-OAEP encrypts only the 32-byte symmetric AES-256 DEK. It never processes document content."
+        },
+        "digital_signatures_rsa_pss": {
+            "payload": "32-byte SHA-256 Digest",
+            "key_size_bits": 2048,
+            "sign_ms": round(statistics.mean(sign_times), 3),
+            "verify_ms": round(statistics.mean(verify_times), 3),
+            "note": "RSA-PSS signs only the 32-byte SHA-256 hash. Document payload is digested locally."
+        }
+    }
+
+
+_last_benchmark_result = None
+_last_benchmark_time = 0.0
+
+@router.get("/benchmark")
+async def get_crypto_benchmark(user=Depends(verify_jwt)):
+    """Measure pure CPU cryptographic latency and throughput across file sizes (cached for 10s to prevent DoS)."""
+    global _last_benchmark_result, _last_benchmark_time
+    now = time.time()
+    if _last_benchmark_result is not None and (now - _last_benchmark_time) < 10.0:
+        return ApiResponse(200, _last_benchmark_result, "Cryptographic performance benchmark completed")
+
+    data = await run_in_threadpool(benchmark_cryptography)
+    _last_benchmark_result = data
+    _last_benchmark_time = now
+    return ApiResponse(200, data, "Cryptographic performance benchmark completed")
 
 
 @router.post("/wrapping", status_code=201)

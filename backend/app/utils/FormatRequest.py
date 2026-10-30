@@ -1,6 +1,5 @@
 from uuid import UUID
 from app.utils.ApiError import ApiError
-from app.utils.ApiResponse import ApiResponse
 
 async def read_body(request):
     content_type = request.headers.get("content-type", "").lower()

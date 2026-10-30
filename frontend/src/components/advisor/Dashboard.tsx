@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Activity, ShieldCheck, PenLine, Share2, ChevronRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import SecurityDashboard from "../security/SecurityDashboard";
 
 export default function Dashboard() {
   const { permissions, can } = useAuth();
@@ -30,7 +31,7 @@ export default function Dashboard() {
   ].filter((action) => action.visible);
 
   return (
-    <main className="space-y-6">
+    <main className="space-y-8">
       <div>
         <p className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
           Independent Oversight
@@ -39,7 +40,7 @@ export default function Dashboard() {
           Security Auditor Console
         </h1>
         <p className="mt-1 text-xs text-neutral-400">
-          Independent compliance review, cryptographic audit trails, and risk event monitoring.
+          Independent compliance review, cryptographic audit trails, and continuous risk intelligence.
         </p>
       </div>
 
@@ -73,6 +74,10 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Main Security Intelligence & Behavioral Graphs */}
+      <SecurityDashboard />
+
+      {/* Quick Links Section */}
       <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
         <h2 className="text-base font-semibold text-white">
           Auditor Verification Tools

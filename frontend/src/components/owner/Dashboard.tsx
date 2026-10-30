@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { Upload, Share2, PenLine, FileText, ChevronRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import SharingStatusChart from "../security/SharingStatusChart";
+import CryptoPerformanceChart from "../security/CryptoPerformanceChart";
 
 export default function Dashboard() {
   const { receipts, can } = useAuth();
@@ -30,7 +32,7 @@ export default function Dashboard() {
   ].filter((action) => action.visible);
 
   return (
-    <main className="space-y-6">
+    <main className="space-y-8">
       <div>
         <p className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
           Document Custody
@@ -39,7 +41,7 @@ export default function Dashboard() {
           Owner Console
         </h1>
         <p className="mt-1 text-xs text-neutral-400">
-          Manage your sovereign encrypted documents and access grants.
+          Manage your sovereign encrypted documents, cryptographic verifications, and sharing grants.
         </p>
       </div>
 
@@ -73,6 +75,12 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Sharing Status Breakdown */}
+      <SharingStatusChart />
+
+      {/* Cryptographic Execution Benchmark */}
+      <CryptoPerformanceChart />
+
       <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
         <h2 className="text-base font-semibold text-white">
           Document Operations
@@ -99,38 +107,6 @@ export default function Dashboard() {
           ))}
         </div>
       </section>
-
-      {can("documents.upload") && (
-        <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
-          <h2 className="text-base font-semibold text-white">
-            Recent Upload Receipts
-          </h2>
-
-          {receipts.length === 0 ? (
-            <p className="mt-3 text-xs text-neutral-500">
-              No uploads during this session. Use the Upload tool to ingest new files.
-            </p>
-          ) : (
-            <ul className="mt-4 divide-y divide-white/[0.06]">
-              {receipts.slice(0, 5).map((receipt) => (
-                <li key={receipt.id} className="py-3 flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-medium text-white">
-                      {receipt.filename}
-                    </p>
-                    <p className="mt-0.5 font-mono text-[10px] text-amber-400/80">
-                      ID: {receipt.id}
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono text-emerald-300">
-                    Encrypted
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
     </main>
   );
 }

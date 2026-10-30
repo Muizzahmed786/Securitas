@@ -18,10 +18,29 @@ export type DocumentVerification = {
   has_signatures: boolean; signatures: SignatureCheck[];
 };
 
+const MAX_UPLOAD_SIZE = 20 * 1024 * 1024; // 20 MiB
+const ALLOWED_EXTENSIONS = [".pdf", ".doc", ".docx"];
+const VALID_CLASSIFICATIONS = ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"];
+
 export async function uploadDocument(file: File, classification = "INTERNAL"): Promise<UploadReceipt> {
+  if (!file) {
+    throw new Error("A document file is required.");
+  }
+  if (file.size > MAX_UPLOAD_SIZE) {
+    throw new Error("File exceeds maximum upload size of 20 MiB.");
+  }
+  const ext = "." + (file.name.split(".").pop() ?? "").toLowerCase();
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    throw new Error("Only PDF, DOC, and DOCX files are supported.");
+  }
+  const cleanClassification = classification.trim().toUpperCase();
+  if (!VALID_CLASSIFICATIONS.includes(cleanClassification)) {
+    throw new Error("Classification must be PUBLIC, INTERNAL, CONFIDENTIAL, or RESTRICTED.");
+  }
+
   const form = new FormData();
   form.append("file", file);
-  form.append("classification", classification);
+  form.append("classification", cleanClassification);
   return unwrap<UploadReceipt>(await API.post("/documents/upload", form));
 }
 
@@ -56,5 +75,5 @@ export function saveBlob(blob: Blob, filename: string): void {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }

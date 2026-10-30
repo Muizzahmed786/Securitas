@@ -34,11 +34,21 @@ export default function Login() {
     clearMessages();
 
     try {
+      const trimmedEmail = email.trim();
+      if (!trimmedEmail) {
+        throw new Error("Email address is required.");
+      }
+      if (!password) {
+        throw new Error("Password is required.");
+      }
+      if (password.length < 8) {
+        throw new Error("Password must be at least 8 characters long.");
+      }
       if (new TextEncoder().encode(password).length > 72) {
         throw new Error("Password must not exceed 72 UTF-8 bytes.");
       }
 
-      const loggedInUser = await auth.login(email, password);
+      const loggedInUser = await auth.login(trimmedEmail, password);
       setUser(loggedInUser);
       navigate("/workspace/dashboard");
     } catch (e) {

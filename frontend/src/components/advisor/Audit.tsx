@@ -16,6 +16,7 @@ import {
 import { risk, type RiskEvent } from "../../api/risk";
 import { errorMessage } from "../../api/http";
 import { useAuth } from "../../context/AuthContext";
+import SecurityActivityChart from "../security/SecurityActivityChart";
 
 const PAGE_SIZE = 50;
 
@@ -258,15 +259,31 @@ export default function Audit() {
             </h3>
             <div className="mt-2 space-y-2 text-xs">
               {Object.entries(stats.action_breakdown).map(([name, count]) => (
-                <div key={name} className="flex justify-between gap-3 border-b border-white/[0.04] pb-1.5">
-                  <span className="font-mono text-neutral-300">{name}</span>
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => {
+                    setAction(name);
+                    setOffset(0);
+                    setFilters((f) => ({ ...f, action: name }));
+                    setRefreshCount((c) => c + 1);
+                  }}
+                  className="flex w-full justify-between gap-3 border-b border-white/[0.04] pb-1.5 text-left transition hover:text-amber-400 group"
+                  title={`Filter ledger by ${name}`}
+                >
+                  <span className="font-mono text-neutral-300 group-hover:text-amber-400 underline decoration-dotted underline-offset-2">
+                    {name}
+                  </span>
                   <strong className="font-mono text-white">{count}</strong>
-                </div>
+                </button>
               ))}
             </div>
           </div>
         </section>
       )}
+
+      {/* Security Activity Timeline Chart */}
+      <SecurityActivityChart events={events} />
 
       {/* Audit Events Table Section */}
       <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl space-y-5">

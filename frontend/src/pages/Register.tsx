@@ -37,6 +37,9 @@ export default function Register() {
     clearMessages();
 
     try {
+      if (password.length < 12) {
+        throw new Error("Password must be at least 12 characters long.");
+      }
       if (new TextEncoder().encode(password).length > 72) {
         throw new Error("Password must not exceed 72 UTF-8 bytes.");
       }
@@ -183,7 +186,9 @@ export default function Register() {
                 <option value={2}>Document Owner (Upload, Encrypt, Sign & Share)</option>
                 <option value={3}>Employee (Read, Decrypt with Step-Up, Verify)</option>
                 <option value={4}>Security Auditor (Inspect Logs & Telemetry)</option>
-                <option value={1}>Administrator (Master Key Setup & Tenants)</option>
+                {user?.role === "ADMIN" && (
+                  <option value={1}>Administrator (Master Key Setup & Tenants)</option>
+                )}
               </select>
             </div>
 

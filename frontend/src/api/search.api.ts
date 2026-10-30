@@ -11,8 +11,16 @@ export async function searchDocuments(
   challengeId?: string,
   otp?: string,
 ): Promise<SearchResult> {
+  const cleanQuery = query.trim();
+  if (!cleanQuery) {
+    throw new Error("Search query cannot be empty.");
+  }
+  if (cleanQuery.length > 300) {
+    throw new Error("Search query cannot exceed 300 characters.");
+  }
+
   const body = {
-    query: query.trim(),
+    query: cleanQuery,
     ...(challengeId && otp
       ? {
           challenge_id: challengeId,

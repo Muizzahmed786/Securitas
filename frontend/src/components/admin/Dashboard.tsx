@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ShieldCheck, KeyRound, Share2, PenLine, ChevronRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import SecurityDashboard from "../security/SecurityDashboard";
 
 export default function Dashboard() {
   const { permissions, can } = useAuth();
@@ -30,7 +31,7 @@ export default function Dashboard() {
   ].filter((action) => action.visible);
 
   return (
-    <main className="space-y-6">
+    <main className="space-y-8">
       <div>
         <p className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
           System Administration
@@ -39,7 +40,7 @@ export default function Dashboard() {
           Admin Console
         </h1>
         <p className="mt-1 text-xs text-neutral-400">
-          Tenant encryption keys, authorization topology, and security operations.
+          Tenant encryption keys, authorization topology, and cryptographic security operations.
         </p>
       </div>
 
@@ -73,6 +74,10 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Main Security Analytics & Behavioral Graphs */}
+      <SecurityDashboard />
+
+      {/* Management Tools */}
       <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
         <h2 className="text-base font-semibold text-white">
           Cryptographic Management Tools
@@ -97,12 +102,6 @@ export default function Dashboard() {
               <ChevronRight size={16} className="text-neutral-500" />
             </Link>
           ))}
-
-          {actions.length === 0 && (
-            <p className="text-xs text-neutral-500">
-              No management tools are available for your current permissions.
-            </p>
-          )}
         </div>
       </section>
     </main>
