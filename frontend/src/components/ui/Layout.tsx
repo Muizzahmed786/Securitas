@@ -15,6 +15,7 @@ import {
   AlertCircle,
   RefreshCw,
   Search,
+  Presentation,
 } from "lucide-react";
 import { auth } from "../../api/auth";
 import { errorMessage } from "../../api/http";
@@ -94,6 +95,12 @@ export default function Layout() {
       icon: User,
       visible: true,
     },
+    {
+      to: "/workspace/rooms",
+      label: "Rooms",
+      icon: Presentation,
+      visible: true,
+    }
   ].filter((item) => item.visible);
 
   async function signOut() {
@@ -147,6 +154,7 @@ export default function Layout() {
               <Icon size={16} className="shrink-0 text-amber-400/80" />
               <span>{label}</span>
             </NavLink>
+            
           ))}
         </nav>
 

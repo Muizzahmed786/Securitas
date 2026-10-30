@@ -18,6 +18,7 @@ from app.signatures.router import router as signatures_router
 from app.risk.router import router as risk_router
 from app.audit.router import router as audit_router
 from app.search.router import router as search_router
+from app.rooms.router import router as rooms_router
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,11 @@ app.include_router(signatures_router, prefix="/api/signatures", tags=["Signature
 app.include_router(risk_router, prefix="/api/risk", tags=["Risk"])
 app.include_router(audit_router, prefix="/api/audit", tags=["Audit"])
 app.include_router(search_router, prefix="/api/search", tags=["Search"])
-
+app.include_router(
+    rooms_router,
+    prefix="/api/rooms",
+    tags=["Rooms"],
+)
 
 @app.get("/health")
 async def health_check():
