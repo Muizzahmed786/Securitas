@@ -1,7 +1,7 @@
 import json
 from uuid import UUID
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import text
 
 from app.database import get_db
@@ -16,6 +16,16 @@ from app.risk.policies import get_active_risk_policy
 
 router = APIRouter()
 
+VALID_ACTIONS = {
+    "documents.download",
+    "documents.read",
+    "documents.search",
+    "documents.upload",
+    "documents.share",
+    "documents.verify",
+}
+VALID_CLASSIFICATIONS = {"PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"}
+
 
 @router.post("/evaluate")
 async def evaluate_risk_endpoint(
@@ -25,9 +35,13 @@ async def evaluate_risk_endpoint(
 ):
     body = await read_body(request)
     action = body.get("action", "documents.download")
+    if action not in VALID_ACTIONS:
+        raise ApiError(400, f"Invalid action. Must be one of: {sorted(list(VALID_ACTIONS))}")
     doc_id_raw = body.get("document_id")
     document_id = UUID(doc_id_raw) if doc_id_raw else None
-    classification = body.get("classification", "INTERNAL")
+    classification = str(body.get("classification", "INTERNAL")).strip().upper()
+    if classification not in VALID_CLASSIFICATIONS:
+        raise ApiError(400, f"Invalid classification. Must be one of: {sorted(list(VALID_CLASSIFICATIONS))}")
 
     context = RiskContext(
         user_id=user["id"],
@@ -89,6 +103,8 @@ async def verify_step_up_endpoint(
 
 @router.get("/events")
 async def list_risk_events(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     user=Depends(require_permission("risk.read")),
     db=Depends(get_db),
 ):
@@ -98,8 +114,9 @@ async def list_risk_events(
                    risk_score, risk_level, factors, decision, reason, timestamp
             FROM risk_events
             ORDER BY timestamp DESC
-            LIMIT 50
-        """)
+            LIMIT :limit OFFSET :offset
+        """),
+        {"limit": limit, "offset": offset}
     )
     events = []
     for row in result.mappings().all():

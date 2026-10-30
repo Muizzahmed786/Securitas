@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 import bcrypt
@@ -173,9 +174,26 @@ async def register(request: Request, db=Depends(get_db)):
         try:
             role_id = int(raw_role_id)
         except (ValueError, TypeError):
-            raise ApiError(400, "role_id must be an integer: 1, 2, 3, or 4")
+            raise ApiError(400, "role_id must be 2, 3, or 4")
         if role_id not in [1, 2, 3, 4]:
             raise ApiError(400, "role_id must be an integer: 1, 2, 3, or 4")
+        
+        # Privilege Escalation Guard (F-08):
+        # In production environments (ALLOW_ADMIN_REGISTRATION=false), ADMIN (1) accounts
+        # cannot be self-registered by unauthenticated callers without an active ADMIN token.
+        if role_id == 1:
+            allow_admin_reg = os.getenv("ALLOW_ADMIN_REGISTRATION", "true").lower() == "true"
+            is_authorized_admin = False
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                try:
+                    caller = await verify_jwt(request, db)
+                    if caller.get("role") == "ADMIN":
+                        is_authorized_admin = True
+                except Exception:
+                    pass
+            if not allow_admin_reg and not is_authorized_admin:
+                raise ApiError(403, "Administrator self-registration is disabled")
 
     if "is_active" in body:
         raise ApiError(400, "Account status cannot be set at registration")
@@ -284,7 +302,7 @@ async def login(request: Request, response: Response, db=Depends(get_db)):
             "accessToken": access_token,
             "access_token": access_token,
             "token_type": "bearer",
-            "refreshToken": refresh_token,
+            # Intentionally omit refreshToken from body; it lives in an HttpOnly cookie only.
             "session_id": str(session_id),
         },
         "User logged in successfully",
@@ -334,7 +352,6 @@ async def logout(request: Request, response: Response, db=Depends(get_db)):
 
 
 @router.get("/me")
-@router.get("/get-current-user")
 async def get_current_user(user=Depends(verify_jwt)):
     return ApiResponse(200, user, "Current user fetched successfully")
 

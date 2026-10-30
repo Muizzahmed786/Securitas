@@ -13,6 +13,7 @@ from sqlalchemy import text
 from app.database import get_db
 from app.rbac.dependency import require_permission
 from app.utils.ApiError import ApiError
+from app.utils.FormatRequest import parse_uuid
 from app.utils.ApiResponse import ApiResponse
 from .crypto import ALGORITHM, decode_signature, decrypt_document, generate_key_pair, verify_signature
 
@@ -40,13 +41,6 @@ async def read_json_object(request: Request):
     return body
 
 
-def parse_uuid(value, field):
-    if not isinstance(value, str):
-        raise ApiError(400, f"{field} must be a UUID string")
-    try:
-        return UUID(value)
-    except ValueError as error:
-        raise ApiError(400, f"{field} must be a valid UUID") from error
 
 
 async def audit(db, user, action, document_id=None, metadata=None):

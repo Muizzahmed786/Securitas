@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   RefreshCw,
   ShieldCheck,
+  AlertCircle,
 } from "lucide-react";
 import {
   audit,
@@ -15,6 +16,7 @@ import {
 import { risk, type RiskEvent } from "../../api/risk";
 import { errorMessage } from "../../api/http";
 import { useAuth } from "../../context/AuthContext";
+import SecurityActivityChart from "../security/SecurityActivityChart";
 
 const PAGE_SIZE = 50;
 
@@ -31,16 +33,16 @@ function statusColor(status: string) {
   switch (status) {
     case "SUCCESS":
     case "ALLOW":
-      return "bg-green-50 text-green-700";
+      return "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
     case "CHALLENGED":
     case "STEP_UP_AUTH":
-      return "bg-amber-50 text-amber-700";
+      return "border border-amber-500/30 bg-amber-500/10 text-amber-400";
     case "FAILURE":
     case "DENIED":
     case "BLOCK":
-      return "bg-red-50 text-red-700";
+      return "border border-red-500/30 bg-red-500/10 text-red-400";
     default:
-      return "bg-slate-100 text-slate-700";
+      return "border border-white/10 bg-white/5 text-neutral-400";
   }
 }
 
@@ -152,34 +154,43 @@ export default function Audit() {
 
   const cards = [
     {
-      label: "Total audit events",
+      label: "Total Audit Events",
       value: stats?.total_audit_events ?? 0,
       icon: Activity,
+      color: "text-amber-400",
     },
     {
-      label: "Successful",
+      label: "Successful Operations",
       value: successCount,
       icon: CheckCircle2,
+      color: "text-emerald-400",
     },
     {
-      label: "Challenged or denied",
+      label: "Challenged / Step-Up",
       value: challengedCount + deniedCount,
       icon: ShieldCheck,
+      color: "text-amber-400",
     },
     {
-      label: "Failures",
+      label: "Cryptographic Failures",
       value: failureCount,
       icon: AlertTriangle,
+      color: "text-red-400",
     },
   ];
 
   return (
     <main className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Audit Logs</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Review document activity, access decisions, and security events.
+          <p className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
+            Immutable Oversight
+          </p>
+          <h1 className="mt-1 text-2xl font-light tracking-tight text-white sm:text-3xl">
+            Audit Ledger
+          </h1>
+          <p className="mt-1 text-xs text-neutral-400">
+            Append-only security events with automated secret and key sanitization.
           </p>
         </div>
 
@@ -187,118 +198,154 @@ export default function Audit() {
           type="button"
           disabled={loading || riskLoading}
           onClick={() => setRefreshCount((count) => count + 1)}
-          className="flex items-center gap-2 rounded border px-3 py-2 text-sm disabled:opacity-50"
+          className="btn-secondary text-xs flex items-center gap-2"
         >
-          <RefreshCw size={16} />
-          Refresh
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          <span>Refresh Ledger</span>
         </button>
       </div>
 
       {error && (
-        <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-red-700">
-          {error}
-        </p>
+        <div className="flex items-center gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-300">
+          <AlertCircle size={15} className="shrink-0 text-red-400" />
+          <p role="alert">{error}</p>
+        </div>
       )}
 
+      {/* Summary Stat Cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(({ label, value, icon: Icon }) => (
-          <div key={label} className="rounded-lg border bg-white p-5">
-            <Icon size={22} className="text-blue-600" />
-            <p className="mt-3 text-sm text-slate-500">{label}</p>
-            <p className="mt-1 text-2xl font-bold">{value}</p>
+        {cards.map(({ label, value, icon: Icon, color }) => (
+          <div key={label} className="rounded-2xl border border-white/10 bg-[#121218] p-5 shadow-xl">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03]">
+              <Icon size={18} className={color} />
+            </span>
+            <p className="mt-3 text-xs text-neutral-400">{label}</p>
+            <p className="mt-1 font-mono text-2xl font-semibold text-white">{value}</p>
           </div>
         ))}
       </div>
 
+      {/* Stats Breakdown */}
       {stats && (
         <section className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-lg border bg-white p-5">
-            <h2 className="font-semibold">Risk levels</h2>
-            <div className="mt-3 space-y-2 text-sm">
+          <div className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">
+              Risk Decision Distribution
+            </h2>
+            <div className="mt-4 space-y-2.5 text-xs">
               {Object.entries(stats.risk_distribution).length === 0 ? (
-                <p className="text-slate-500">No risk events recorded.</p>
+                <p className="text-neutral-500">No risk events recorded in baseline.</p>
               ) : (
                 Object.entries(stats.risk_distribution).map(([level, count]) => (
-                  <p key={level} className="flex justify-between">
-                    <span>{level}</span>
-                    <strong>{count}</strong>
-                  </p>
+                  <div key={level} className="flex justify-between border-b border-white/[0.05] pb-2">
+                    <span className="text-neutral-300">{level}</span>
+                    <strong className="font-mono text-white">{count}</strong>
+                  </div>
                 ))
               )}
             </div>
           </div>
 
-          <div className="rounded-lg border bg-white p-5">
-            <h2 className="font-semibold">Other security activity</h2>
-            <p className="mt-3 flex justify-between text-sm">
-              <span>Integrity failures</span>
-              <strong>{stats.integrity_failures}</strong>
-            </p>
-            <h3 className="mt-4 text-sm font-medium">Top actions</h3>
-            <div className="mt-2 space-y-2 text-sm">
+          <div className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">
+              Tamper & Activity Diagnostics
+            </h2>
+            <div className="mt-4 flex justify-between border-b border-white/[0.05] pb-2 text-xs">
+              <span className="text-neutral-300">Integrity Signature Failures</span>
+              <strong className="font-mono text-amber-400">{stats.integrity_failures}</strong>
+            </div>
+            <h3 className="mt-4 text-xs font-medium text-neutral-400 uppercase tracking-wider">
+              Top Audited Operations
+            </h3>
+            <div className="mt-2 space-y-2 text-xs">
               {Object.entries(stats.action_breakdown).map(([name, count]) => (
-                <p key={name} className="flex justify-between gap-3">
-                  <span className="break-all">{name}</span>
-                  <strong>{count}</strong>
-                </p>
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => {
+                    setAction(name);
+                    setOffset(0);
+                    setFilters((f) => ({ ...f, action: name }));
+                    setRefreshCount((c) => c + 1);
+                  }}
+                  className="flex w-full justify-between gap-3 border-b border-white/[0.04] pb-1.5 text-left transition hover:text-amber-400 group"
+                  title={`Filter ledger by ${name}`}
+                >
+                  <span className="font-mono text-neutral-300 group-hover:text-amber-400 underline decoration-dotted underline-offset-2">
+                    {name}
+                  </span>
+                  <strong className="font-mono text-white">{count}</strong>
+                </button>
               ))}
             </div>
           </div>
         </section>
       )}
 
-      <section className="rounded-lg border bg-white p-5">
-        <h2 className="text-lg font-semibold">Audit events</h2>
+      {/* Security Activity Timeline Chart */}
+      <SecurityActivityChart events={events} />
 
+      {/* Audit Events Table Section */}
+      <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-white">
+            Security Event Ledger
+          </h2>
+          <span className="text-xs text-neutral-400 font-mono">
+            {events.length} Loaded
+          </span>
+        </div>
+
+        {/* Filters Form */}
         <form
           onSubmit={applyFilters}
-          className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 rounded-xl border border-white/[0.08] bg-black/40 p-4"
         >
-          <label className="space-y-1 text-sm">
-            <span>Action</span>
+          <div className="space-y-1">
+            <label className="field-label">Action Filter</label>
             <input
-              className="w-full rounded border px-3 py-2"
+              className="input-style text-xs"
               placeholder="e.g. documents.download"
               value={action}
               onChange={(event) => setAction(event.target.value)}
             />
-          </label>
+          </div>
 
-          <label className="space-y-1 text-sm">
-            <span>Status</span>
+          <div className="space-y-1">
+            <label className="field-label">Outcome Status</label>
             <select
-              className="w-full rounded border px-3 py-2"
+              className="input-style text-xs cursor-pointer"
               value={status}
               onChange={(event) => setStatus(event.target.value)}
             >
               <option value="">All statuses</option>
               <option value="SUCCESS">Success</option>
-              <option value="CHALLENGED">Challenged</option>
+              <option value="CHALLENGED">Challenged (Step-Up)</option>
               <option value="DENIED">Denied</option>
-              <option value="FAILURE">Failure</option>
+              <option value="FAILURE">Cryptographic Failure</option>
             </select>
-          </label>
+          </div>
 
-          <label className="space-y-1 text-sm">
-            <span>User ID</span>
+          <div className="space-y-1">
+            <label className="field-label">User ID</label>
             <input
-              className="w-full rounded border px-3 py-2"
+              className="input-style text-xs"
               type="number"
               min="1"
-              placeholder="Any user"
+              placeholder="Numeric ID"
               value={userId}
               onChange={(event) => setUserId(event.target.value)}
             />
-          </label>
+          </div>
 
           <div className="flex items-end gap-2">
-            <button className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white">
+            <button type="submit" className="btn-primary text-xs flex-1 justify-center">
               Apply
             </button>
             <button
               type="button"
               onClick={clearFilters}
-              className="rounded border px-4 py-2 text-sm"
+              className="btn-secondary text-xs"
             >
               Clear
             </button>
@@ -306,50 +353,52 @@ export default function Audit() {
         </form>
 
         {loading ? (
-          <p className="mt-5 text-sm text-slate-500">Loading audit events…</p>
+          <p className="py-8 text-center text-xs text-neutral-400">Loading audit records…</p>
         ) : events.length === 0 ? (
-          <p className="mt-5 text-sm text-slate-500">
-            No events match these filters.
+          <p className="py-8 text-center text-xs text-neutral-500">
+            No audit records match the applied criteria.
           </p>
         ) : (
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b bg-slate-50 text-slate-600">
+          <div className="overflow-x-auto rounded-xl border border-white/[0.08]">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="p-3">Time</th>
-                  <th className="p-3">Action</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">User</th>
-                  <th className="p-3">Document</th>
-                  <th className="p-3">Details</th>
+                  <th>Timestamp</th>
+                  <th>Action</th>
+                  <th>Status</th>
+                  <th>User Identity</th>
+                  <th>Document ID</th>
+                  <th>Sanitized Payload</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {events.map((event) => (
                   <tr key={event.id}>
-                    <td className="whitespace-nowrap p-3">
+                    <td className="whitespace-nowrap font-mono text-xs text-neutral-400">
                       {formatDate(event.timestamp)}
                     </td>
-                    <td className="p-3">{event.action}</td>
-                    <td className="p-3">
+                    <td className="font-mono text-xs font-semibold text-white">
+                      {event.action}
+                    </td>
+                    <td>
                       <span
-                        className={`rounded-full px-2 py-1 text-xs font-medium ${statusColor(event.status)}`}
+                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium ${statusColor(event.status)}`}
                       >
                         {event.status}
                       </span>
                     </td>
-                    <td className="p-3">
+                    <td className="text-xs text-neutral-300">
                       {event.user_email ?? event.user_id ?? "—"}
                     </td>
-                    <td className="max-w-40 break-all p-3 text-xs">
+                    <td className="max-w-36 truncate font-mono text-[10px] text-amber-400/80">
                       {event.document_id ?? "—"}
                     </td>
-                    <td className="p-3">
-                      <details>
-                        <summary className="cursor-pointer text-blue-700">
-                          View
+                    <td>
+                      <details className="text-xs">
+                        <summary className="cursor-pointer font-medium text-amber-400 hover:text-amber-300">
+                          Inspect
                         </summary>
-                        <pre className="mt-2 max-w-xs overflow-x-auto whitespace-pre-wrap break-all text-xs">
+                        <pre className="mt-2 max-w-xs whitespace-pre-wrap break-all rounded-lg border border-white/10 bg-black/60 p-2 font-mono text-[10px] text-neutral-300 no-scrollbar">
                           {JSON.stringify(event.metadata ?? {}, null, 2)}
                         </pre>
                       </details>
@@ -361,9 +410,10 @@ export default function Audit() {
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-between text-sm">
+        {/* Pagination */}
+        <div className="flex items-center justify-between text-xs text-neutral-400">
           <span>
-            Showing {events.length === 0 ? 0 : offset + 1}–
+            Events {events.length === 0 ? 0 : offset + 1}–
             {offset + events.length}
           </span>
           <div className="flex gap-2">
@@ -371,7 +421,7 @@ export default function Audit() {
               type="button"
               disabled={loading || offset === 0}
               onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-40"
             >
               Previous
             </button>
@@ -379,7 +429,7 @@ export default function Audit() {
               type="button"
               disabled={loading || events.length < PAGE_SIZE}
               onClick={() => setOffset(offset + PAGE_SIZE)}
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-40"
             >
               Next
             </button>
@@ -387,49 +437,52 @@ export default function Audit() {
         </div>
       </section>
 
+      {/* Risk Engine Telemetry */}
       {canReadRisk && (
-        <section className="rounded-lg border bg-white p-5">
-          <h2 className="text-lg font-semibold">Recent risk decisions</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            The backend returns the 50 most recent risk events.
-          </p>
+        <section className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl space-y-4">
+          <div>
+            <h2 className="text-base font-semibold text-white">
+              Adaptive Risk Decisions Telemetry
+            </h2>
+            <p className="mt-0.5 text-xs text-neutral-400">
+              Evaluated in real-time across IP velocity, time anomalies, and data classification.
+            </p>
+          </div>
 
           {riskError && (
-            <p role="alert" className="mt-3 text-red-700">
-              {riskError}
-            </p>
+            <div className="flex items-center gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+              <AlertCircle size={14} className="shrink-0 text-red-400" />
+              <p role="alert">{riskError}</p>
+            </div>
           )}
 
           {riskLoading ? (
-            <p className="mt-4 text-sm text-slate-500">Loading risk events…</p>
+            <p className="py-4 text-xs text-neutral-400">Loading risk events…</p>
           ) : riskEvents.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-500">
-              No risk events recorded.
-            </p>
+            <p className="py-4 text-xs text-neutral-500">No recent risk events recorded.</p>
           ) : (
-            <div className="mt-4 space-y-3">
+            <div className="space-y-3">
               {riskEvents.slice(0, 10).map((event) => (
-                <div key={event.id} className="rounded border p-3 text-sm">
+                <div key={event.id} className="rounded-xl border border-white/[0.08] bg-black/40 p-4 text-xs space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <strong>{event.action}</strong>
+                    <span className="font-mono font-semibold text-white">{event.action}</span>
                     <span
-                      className={`rounded-full px-2 py-1 text-xs font-medium ${statusColor(event.decision)}`}
+                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium ${statusColor(event.decision)}`}
                     >
                       {event.decision}
                     </span>
                   </div>
 
-                  <p className="mt-2 text-slate-600">
-                    Risk: {event.risk_level} ({event.risk_score}) · User ID:{" "}
-                    {event.user_id} · {formatDate(event.timestamp)}
+                  <p className="text-neutral-400">
+                    Risk Level: <strong className="text-amber-400">{event.risk_level}</strong> (Score: {event.risk_score}) · User ID: {event.user_id} · {formatDate(event.timestamp)}
                   </p>
-                  <p className="mt-1 text-slate-600">{event.reason}</p>
+                  <p className="text-neutral-300">{event.reason}</p>
 
-                  <details className="mt-2">
-                    <summary className="cursor-pointer text-blue-700">
-                      View six risk factors
+                  <details className="pt-1">
+                    <summary className="cursor-pointer text-amber-400 hover:text-amber-300">
+                      Inspect 6 Behavioral Factors
                     </summary>
-                    <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all text-xs">
+                    <pre className="mt-2 rounded-lg border border-white/10 bg-black/60 p-3 font-mono text-[10px] text-neutral-300 whitespace-pre-wrap break-all no-scrollbar">
                       {JSON.stringify(event.factors, null, 2)}
                     </pre>
                   </details>

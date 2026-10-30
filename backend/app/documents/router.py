@@ -1,3 +1,11 @@
+import re
+import urllib.parse
+
+def content_disposition_header(filename: str, disposition: str = "attachment") -> str:
+    clean_ascii = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    encoded = urllib.parse.quote(filename, safe='')
+    return f'{disposition}; filename="{clean_ascii}"; filename*=UTF-8\'\'{encoded}'
+
 import io
 import logging
 import os
@@ -12,16 +20,16 @@ from Cryptodome.Cipher import AES, PKCS1_OAEP
 from Cryptodome.Hash import SHA256
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Random import get_random_bytes
-from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text
 
+from app.auth.router import verify_jwt
 from app.database import get_db
 from app.rbac.dependency import require_permission
 from app.utils.ApiError import ApiError
 from app.utils.ApiResponse import ApiResponse
-from app.utils.FormatRequest import read_body
+from app.utils.FormatRequest import read_body, parse_uuid
 from app.signatures.crypto import decrypt_document, verify_signature
 from app.risk.schemas import RiskContext
 from app.risk.service import evaluate_risk, consume_step_up_token
@@ -30,7 +38,6 @@ from app.search.service import prepare_index, save_upload_index
 
 
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
-load_dotenv(BACKEND_DIRECTORY / ".env", override=False)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -57,13 +64,6 @@ MIME_TYPES = {
 }
 
 
-def parse_uuid(value, field):
-    if not isinstance(value, str):
-        raise ApiError(400, f"{field} must be a UUID string")
-    try:
-        return UUID(value)
-    except ValueError as error:
-        raise ApiError(400, f"{field} must be a valid UUID") from error
 
 
 async def read_upload(file: UploadFile) -> bytes:
@@ -447,6 +447,43 @@ async def list_documents(
     return ApiResponse(200, docs, "Documents retrieved successfully")
 
 
+@router.get("/shares/summary")
+async def get_shares_summary(
+    user=Depends(verify_jwt),
+    db=Depends(get_db),
+):
+    is_admin_or_auditor = user.get("role") in ("ADMIN", "SECURITY_AUDITOR")
+    query_str = """
+        SELECT
+            COUNT(*) FILTER (WHERE da.revoked_at IS NOT NULL) AS revoked_count,
+            COUNT(*) FILTER (WHERE da.revoked_at IS NULL AND da.expires_at IS NOT NULL AND da.expires_at <= CURRENT_TIMESTAMP) AS expired_count,
+            COUNT(*) FILTER (WHERE da.revoked_at IS NULL AND (da.expires_at IS NULL OR da.expires_at > CURRENT_TIMESTAMP)) AS active_count,
+            COUNT(*) AS total_shares
+        FROM document_access da
+        JOIN documents d ON d.id = da.document_id
+        WHERE d.deleted_at IS NULL
+    """
+    params = {}
+    if not is_admin_or_auditor:
+        query_str += " AND d.owner_id = :user_id"
+        params["user_id"] = user["id"]
+
+    res = await db.execute(text(query_str), params)
+    row = res.mappings().first()
+
+    return ApiResponse(
+        200,
+        {
+            "active_shares": int(row["active_count"] or 0),
+            "expired_shares": int(row["expired_count"] or 0),
+            "revoked_shares": int(row["revoked_count"] or 0),
+            "total_shares": int(row["total_shares"] or 0),
+            "scope": "SYSTEM_WIDE" if is_admin_or_auditor else "USER_OWNED",
+        },
+        "Document shares summary retrieved successfully",
+    )
+
+
 @router.get("/{document_id}")
 async def get_document_metadata(
     document_id: str,
@@ -596,7 +633,7 @@ async def download_document(
         content=plaintext,
         media_type=doc["mime_type"] or "application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{doc["filename"]}"',
+            "Content-Disposition": content_disposition_header(doc["filename"], "attachment"),
             "X-Content-Type-Options": "nosniff",
             "Cache-Control": "no-store",
             "Pragma": "no-cache",
@@ -713,7 +750,7 @@ async def view_document(
         content=plaintext,
         media_type=doc["mime_type"] or "application/octet-stream",
         headers={
-            "Content-Disposition": f'inline; filename="{doc["filename"]}"',
+            "Content-Disposition": content_disposition_header(doc["filename"], "inline"),
             "X-Content-Type-Options": "nosniff",
             "Cache-Control": "no-store",
             "Pragma": "no-cache",
@@ -750,7 +787,7 @@ async def download_encrypted_document(
         content=ciphertext,
         media_type="application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{doc["filename"]}.enc"',
+            "Content-Disposition": content_disposition_header(f"{doc['filename']}.enc", "attachment"),
             "X-Content-Type-Options": "nosniff",
             "Cache-Control": "no-store",
             "Pragma": "no-cache",
@@ -876,9 +913,13 @@ async def share_document(
 
     # Resolve recipient
     if recipient_id:
+        try:
+            rec_id_int = int(recipient_id)
+        except (ValueError, TypeError):
+            raise ApiError(400, "recipient_id must be a valid integer")
         user_res = await db.execute(
             text("SELECT id, email, is_active FROM users WHERE id = :id"),
-            {"id": int(recipient_id)}
+            {"id": rec_id_int}
         )
     elif recipient_email:
         user_res = await db.execute(
@@ -984,6 +1025,10 @@ async def revoke_document_share(
         raise ApiError(400, "user_id or access_id is required")
 
     if target_user_id:
+        try:
+            target_id_int = int(target_user_id)
+        except (ValueError, TypeError):
+            raise ApiError(400, "user_id / recipient_id must be a valid integer")
         res = await db.execute(
             text("""
                 UPDATE document_access
@@ -991,11 +1036,15 @@ async def revoke_document_share(
                 WHERE document_id = :doc_id AND user_id = :target_id AND revoked_at IS NULL
                 RETURNING id
             """),
-            {"doc_id": doc_uuid, "target_id": int(target_user_id), "user_id": user["id"]}
+            {"doc_id": doc_uuid, "target_id": target_id_int, "user_id": user["id"]}
         )
     else:
         if access_id is None:
             raise ApiError(400, "access_id is required")
+        try:
+            access_id_int = int(access_id)
+        except (ValueError, TypeError):
+            raise ApiError(400, "access_id must be a valid integer")
         res = await db.execute(
             text("""
                 UPDATE document_access
@@ -1003,7 +1052,7 @@ async def revoke_document_share(
                 WHERE document_id = :doc_id AND id = :access_id AND revoked_at IS NULL
                 RETURNING id
             """),
-            {"doc_id": doc_uuid, "access_id": int(access_id), "user_id": user["id"]}
+            {"doc_id": doc_uuid, "access_id": access_id_int, "user_id": user["id"]}
         )
 
     row = res.mappings().first()

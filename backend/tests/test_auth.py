@@ -59,7 +59,7 @@ async def test_login_success(client: AsyncClient):
     assert data["token_type"] == "bearer"
     
     token = data["access_token"]
-    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    payload = jwt.decode(token, settings.ACCESS_TOKEN_SECRET, algorithms=[settings.JWT_ALGORITHM])
     assert "sub" in payload
     assert "jti" in payload
     assert "iat" in payload

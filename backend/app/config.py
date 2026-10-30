@@ -1,4 +1,3 @@
-
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -35,7 +34,10 @@ DOCUMENT_STORAGE_DIR = os.getenv(
 RSA_PRIVATE_KEY_DIR = os.getenv("RSA_PRIVATE_KEY_DIR", "./private_keys")
 
 # Configure a dedicated secret for step-up authentication.
-STEP_UP_HMAC_SECRET = os.getenv("STEP_UP_HMAC_SECRET", "")
+STEP_UP_HMAC_SECRET = (
+    os.getenv("STEP_UP_HMAC_SECRET")
+    or (ACCESS_TOKEN_SECRET + "_step_up_hmac_secret_32bytes!")
+)
 
 
 class Settings:

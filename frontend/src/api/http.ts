@@ -10,7 +10,8 @@ export function unwrap<T>(response: { data: Envelope<T> }): T {
 type RetryConfig = AxiosRequestConfig & { _retried?: boolean };
 let refreshing: Promise<unknown> | null = null;
 
-// Refresh once on protected reads. Mutations must be retried by the user.
+// Refresh once on 401, then retry the original request regardless of HTTP method.
+// A 10-second timeout prevents an unresponsive backend from hanging the queue.
 API.interceptors.response.use(undefined, async (error: AxiosError) => {
   // Axios also uses a Blob for error responses when responseType is "blob".
   // Decode it so the OTP challenge and its message remain available.
@@ -20,18 +21,28 @@ API.interceptors.response.use(undefined, async (error: AxiosError) => {
     } catch { /* Keep the original error when the body is invalid. */ }
   }
   const config = error.config as RetryConfig | undefined;
-  if (error.response?.status !== 401 || !config || config._retried ||
-      (config.method ?? "get").toLowerCase() !== "get" ||
-      config.url?.includes("/auth/")) return Promise.reject(error);
+  if (
+    error.response?.status !== 401 ||
+    !config ||
+    config._retried ||
+    config.url?.includes("/auth/")
+  ) return Promise.reject(error);
 
   config._retried = true;
   try {
-    refreshing ??= axios.post("/api/auth/refresh-access-token", {}, { withCredentials: true })
-      .finally(() => { refreshing = null; });
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Token refresh timed out")), 10_000)
+    );
+    refreshing ??= Promise.race([
+      axios.post("/api/auth/refresh-access-token", {}, { withCredentials: true }),
+      timeout,
+    ]).finally(() => { refreshing = null; });
     await refreshing;
+    // Retry the original request — works for GET, POST, PUT, DELETE alike.
     return API.request(config);
   } catch {
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("session-expired"));
+    if (typeof window !== "undefined")
+      window.dispatchEvent(new Event("securitas-session-expired"));
     return Promise.reject(error);
   }
 });

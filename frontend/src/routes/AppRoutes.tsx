@@ -1,4 +1,5 @@
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 import Landing from "../pages/Landing";
@@ -19,12 +20,20 @@ import AdvisorDashboard from "../components/advisor/Dashboard";
 import Audit from "../components/advisor/Audit";
 import Sharing from "../components/documents/Sharing";
 import Signatures from "../components/documents/Signatures";
+import Search from "../components/documents/Search";
 
 function DashboardForRole() {
   const { user, permissionsLoading } = useAuth();
 
   if (permissionsLoading) {
-    return <p>Loading permissions…</p>;
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center text-neutral-400">
+        <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#121218] px-6 py-4 shadow-xl">
+          <Loader2 className="h-5 w-5 animate-spin text-amber-400" />
+          <span className="text-xs font-medium">Loading workspace…</span>
+        </div>
+      </div>
+    );
   }
 
   switch (user?.role.toUpperCase()) {
@@ -43,7 +52,11 @@ function DashboardForRole() {
       return <AdvisorDashboard />;
 
     default:
-      return <p>Your account does not have a recognized role.</p>;
+      return (
+        <div className="rounded-2xl border border-white/10 bg-[#121218] p-8 text-center text-sm text-neutral-400">
+          Your account does not have a recognized role.
+        </div>
+      );
   }
 }
 
@@ -104,6 +117,17 @@ export default function AppRoutes() {
             <Route path="sharing" element={<Sharing />} />
           </Route>
 
+          {/* Encrypted content search */}
+          <Route
+            element={
+              <ProtectedRoute
+                permissions={["documents.search", "documents.read"]}
+              />
+            }
+          >
+            <Route path="search" element={<Search />} />
+          </Route>
+
           {/* Shared signing and verification */}
           <Route
             element={
@@ -115,7 +139,7 @@ export default function AppRoutes() {
             <Route path="signatures" element={<Signatures />} />
           </Route>
 
-          {/* Keep the old role URLs working */}
+          {/* Keep legacy role URLs working */}
           <Route
             element={<ProtectedRoute allowedRoles={["ADMIN"]} />}
           >
