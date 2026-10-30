@@ -4,6 +4,20 @@ import {
   type FormEvent,
 } from "react";
 import { Link, useParams } from "react-router-dom";
+import {
+  ArrowLeft,
+  Share2,
+  FileText,
+  Download,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  ShieldCheck,
+  ShieldAlert,
+  Loader2,
+  Copy,
+  Check,
+} from "lucide-react";
 
 import { errorMessage } from "../api/http";
 import { risk } from "../api/risk";
@@ -29,6 +43,28 @@ function saveFile(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function classificationColor(level?: string) {
+  switch (level?.toUpperCase()) {
+    case "RESTRICTED":
+      return "border-red-500/30 bg-red-500/10 text-red-400";
+    case "CONFIDENTIAL":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+    case "INTERNAL":
+      return "border-blue-500/30 bg-blue-500/10 text-blue-400";
+    case "PUBLIC":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
+    default:
+      return "border-white/10 bg-white/5 text-neutral-400";
+  }
+}
+
+function formatSize(bytes?: number) {
+  if (bytes == null || bytes === 0) return null;
+  return bytes < 1024 * 1024
+    ? `${(bytes / 1024).toFixed(1)} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function RoomDetails() {
   const { roomId = "" } = useParams();
   const { user, can } = useAuth();
@@ -40,6 +76,7 @@ export default function RoomDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const [pending, setPending] = useState<{
     doc: RoomDocument;
@@ -167,8 +204,16 @@ export default function RoomDetails() {
     }
   }
 
-  const button =
-    "rounded border border-gray-300 bg-white px-3 py-2 disabled:opacity-50";
+  function handleCopyId() {
+    if (!room?.id) return;
+    navigator.clipboard
+      .writeText(room.id)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {});
+  }
 
   const available = owned.filter(
     (doc) =>
@@ -178,113 +223,254 @@ export default function RoomDetails() {
   );
 
   return (
-    <main className="mx-auto max-w-4xl space-y-5 p-4">
-      <Link to="/workspace/rooms" className="underline">
-        Back to rooms
-      </Link>
+    <main className="space-y-6">
+      {/* Top Navigation */}
+      <div>
+        <Link
+          to="/workspace/rooms"
+          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3.5 py-1.5 text-xs text-neutral-300 transition hover:border-amber-500/40 hover:bg-white/10 hover:text-white"
+        >
+          <ArrowLeft size={14} className="text-amber-400" />
+          <span>Back to Rooms</span>
+        </Link>
+      </div>
 
+      {/* Error Alert */}
       {error && (
-        <p role="alert" className="text-red-700">
-          {error}
-        </p>
+        <div
+          role="alert"
+          className="flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-950/20 p-4 text-xs text-red-300"
+        >
+          <AlertCircle className="h-5 w-5 shrink-0 text-red-400" />
+          <span>{error}</span>
+        </div>
       )}
 
+      {/* Notice / Success Alert */}
       {notice && (
-        <p role="status" className="text-green-700">
-          {notice}
-        </p>
+        <div
+          role="status"
+          className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4 text-xs text-emerald-300"
+        >
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+          <span>{notice}</span>
+        </div>
       )}
 
-      {loading && <p>Loading room...</p>}
+      {/* Loading State */}
+      {loading && (
+        <div className="flex min-h-[300px] items-center justify-center gap-3 rounded-2xl border border-white/10 bg-[#121218] p-12 text-xs text-neutral-400 shadow-xl">
+          <Loader2 className="h-5 w-5 animate-spin text-amber-400" />
+          <span>Loading room enclave...</span>
+        </div>
+      )}
 
+      {/* Room Details View */}
       {room && (
         <>
-          <header className="space-y-2">
-            <h1 className="text-2xl font-semibold">
-              {room.name}
-            </h1>
+          {/* Header Card */}
+          <header className="rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-0.5 text-xs font-mono font-medium text-amber-400 uppercase">
+                    Active Enclave
+                  </span>
+                  {String(room.owner_id) === String(user?.id) ? (
+                    <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-mono font-medium text-emerald-400">
+                      Host (You)
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs font-mono text-neutral-400">
+                      Member
+                    </span>
+                  )}
+                </div>
+                <h1 className="text-2xl font-light tracking-tight text-white sm:text-3xl">
+                  {room.name}
+                </h1>
+                <p className="text-xs text-neutral-400">
+                  Share this Enclave ID with teammates to grant collaborative access.
+                </p>
+              </div>
 
-            <p className="break-all">
-              Room ID:{" "}
-              <code className="select-all">{room.id}</code>
-            </p>
+              {/* Room ID with copy button */}
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/60 p-2 sm:p-2.5">
+                <div className="flex flex-col px-1">
+                  <span className="text-[10px] uppercase tracking-wider text-neutral-500">
+                    Room ID
+                  </span>
+                  <code className="select-all font-mono text-xs text-neutral-200">
+                    {room.id}
+                  </code>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyId}
+                  title="Copy Room ID"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  {copied ? (
+                    <Check size={14} className="text-emerald-400" />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                </button>
+              </div>
+            </div>
 
-            <p className="text-sm text-gray-600">
-              Share this ID with people you want to join.
-            </p>
+            {/* Security Guarantee callout matching Landing page */}
+            <div className="mt-6 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs">
+              <span className="font-semibold text-amber-400">Security Guarantee: </span>
+              <span className="text-neutral-300">
+                Documents shared within this enclave are protected by envelope encryption (AES-256-GCM / RSA-OAEP). Decryption operations require verified authorization and are audited.
+              </span>
+            </div>
           </header>
 
+          {/* Share Document Form */}
           {can("documents.share") && (
             <form
               onSubmit={(event) => void share(event)}
-              className="space-y-3 rounded-lg border border-gray-200 bg-white p-4"
+              className="space-y-4 rounded-2xl border border-white/10 bg-[#121218] p-6 shadow-xl"
             >
-              <label className="block">
-                Share one of your documents
-                <select
-                  value={selected}
-                  onChange={(event) =>
-                    setSelected(event.target.value)
-                  }
-                  required
-                  className="mt-2 w-full rounded border border-gray-300 bg-white p-2"
-                >
-                  <option value="">Select a document</option>
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-400">
+                  <Share2 size={18} />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-white">
+                    Share Document in Room
+                  </h2>
+                  <p className="text-xs text-neutral-400">
+                    Authorize room members to decrypt and download one of your documents.
+                  </p>
+                </div>
+              </div>
 
+              <div>
+                <label
+                  htmlFor="share-document-select"
+                  className="block text-xs font-medium text-neutral-300"
+                >
+                  Select Document from Vault
+                </label>
+                <select
+                  id="share-document-select"
+                  value={selected}
+                  onChange={(event) => setSelected(event.target.value)}
+                  required
+                  className="input-style mt-1.5"
+                >
+                  <option value="" className="bg-[#121217] text-neutral-400">
+                    -- Select a document to share --
+                  </option>
                   {available.map((doc) => (
-                    <option key={doc.id} value={doc.id}>
-                      {doc.filename}
+                    <option
+                      key={doc.id}
+                      value={doc.id}
+                      className="bg-[#121217] text-white"
+                    >
+                      {doc.filename} ({doc.classification})
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
 
-              <p className="text-sm text-gray-600">
-                Upload new documents using your existing Upload
-                page, then return here.
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+                <p className="text-xs text-neutral-500">
+                  Need to share a new file? Upload via your{" "}
+                  <Link
+                    to="/workspace/owner/upload"
+                    className="text-amber-400 underline hover:text-amber-300"
+                  >
+                    Upload
+                  </Link>{" "}
+                  page, then return here.
+                </p>
 
-              <button
-                className={button}
-                disabled={busy || !selected}
-              >
-                Share in room
-              </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={busy || !selected}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-black" />
+                      <span>Sharing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="h-4 w-4" />
+                      <span>Share in Room</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </form>
           )}
 
+          {/* Adaptive Risk Step-Up Challenge Modal / Card */}
           {pending && (
             <form
               onSubmit={(event) => void verify(event)}
-              className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4"
+              className="space-y-4 rounded-2xl border border-amber-500/40 bg-gradient-to-b from-amber-500/10 to-transparent p-6 shadow-xl"
             >
-              <h2 className="font-semibold">
-                Additional verification required
-              </h2>
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/20 p-2.5 text-amber-400">
+                  <ShieldAlert size={20} />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-white">
+                    Additional Verification Required
+                  </h2>
+                  <p className="text-xs text-neutral-300">
+                    Adaptive risk evaluation flagged this access attempt. Enter your 6-digit one-time code to proceed with decryption.
+                  </p>
+                </div>
+              </div>
 
-              <label className="block">
-                Verification code
+              <div className="max-w-xs">
+                <label
+                  htmlFor="otp-verification-input"
+                  className="block text-xs font-medium text-neutral-300"
+                >
+                  Verification Code (OTP)
+                </label>
                 <input
+                  id="otp-verification-input"
                   value={otp}
                   onChange={(event) => setOtp(event.target.value)}
                   required
                   autoComplete="one-time-code"
                   inputMode="numeric"
-                  className="mt-2 block rounded border border-gray-300 bg-white p-2"
+                  placeholder="000000"
+                  className="mt-2 block w-full rounded-xl border border-amber-500/40 bg-black/60 px-4 py-2.5 text-center font-mono text-lg tracking-widest text-amber-300 placeholder-neutral-600 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
                 />
-              </label>
+              </div>
 
-              <div className="flex gap-2">
+              <div className="flex items-center gap-3 pt-2">
                 <button
-                  className={button}
+                  type="submit"
+                  className="btn-primary"
                   disabled={busy || !otp.trim()}
                 >
-                  Verify and download
+                  {busy ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-black" />
+                      <span>Verifying...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="h-4 w-4" />
+                      <span>Verify & Download</span>
+                    </>
+                  )}
                 </button>
 
                 <button
                   type="button"
-                  className={button}
+                  className="btn-secondary"
                   disabled={busy}
                   onClick={() => {
                     setPending(null);
@@ -297,60 +483,114 @@ export default function RoomDetails() {
             </form>
           )}
 
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold">
-              Shared documents
-            </h2>
-
-            <button
-              className={button}
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setError("");
-
-                try {
-                  setRoom(await rooms.get(roomId));
-                } catch (err) {
-                  setError(errorMessage(err));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Refresh documents
-            </button>
-
-            {room.documents.length === 0 && (
-              <p>No documents available in this room.</p>
-            )}
-
-            {room.documents.map((doc) => (
-              <article
-                key={doc.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4"
-              >
+          {/* Shared Documents Section */}
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-white/10 bg-black/40 p-2 text-amber-400">
+                  <FileText size={18} />
+                </div>
                 <div>
-                  <p className="break-all font-medium">
-                    {doc.filename}
-                  </p>
-
-                  <p className="text-sm text-gray-600">
-                    {doc.classification}
+                  <h2 className="text-base font-semibold text-white">
+                    Shared Documents
+                  </h2>
+                  <p className="text-xs text-neutral-400">
+                    Cryptographically protected files available to verified room members.
                   </p>
                 </div>
+              </div>
 
-                {can("documents.download") && (
-                  <button
-                    className={button}
-                    disabled={busy}
-                    onClick={() => void download(doc)}
+              <div className="flex items-center gap-3">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs font-mono text-neutral-400">
+                  {room.documents.length}{" "}
+                  {room.documents.length === 1 ? "document" : "documents"}
+                </span>
+
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    setError("");
+
+                    try {
+                      setRoom(await rooms.get(roomId));
+                    } catch (err) {
+                      setError(errorMessage(err));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <RefreshCw
+                    size={13}
+                    className={busy ? "animate-spin" : ""}
+                  />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {room.documents.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/15 bg-[#121218]/40 p-12 text-center shadow-xl">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-neutral-400">
+                  <FileText className="h-6 w-6 text-amber-400/80" />
+                </div>
+                <h3 className="mt-4 text-sm font-medium text-white">
+                  No documents shared yet
+                </h3>
+                <p className="mx-auto mt-1 max-w-sm text-xs text-neutral-400">
+                  Share an encrypted document from your vault above to allow other members in this room to download it.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {room.documents.map((doc) => (
+                  <article
+                    key={doc.id}
+                    className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#121218] p-4 transition hover:border-white/20"
                   >
-                    Download
-                  </button>
-                )}
-              </article>
-            ))}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-neutral-300">
+                        <FileText size={20} className="text-amber-400/90" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white">
+                          {doc.filename}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-mono font-medium ${classificationColor(
+                              doc.classification,
+                            )}`}
+                          >
+                            {doc.classification}
+                          </span>
+                          {doc.file_size_bytes != null && (
+                            <span className="font-mono text-[11px] text-neutral-400">
+                              {formatSize(doc.file_size_bytes)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {can("documents.download") && (
+                      <button
+                        type="button"
+                        className="btn-secondary text-xs"
+                        disabled={busy}
+                        onClick={() => void download(doc)}
+                      >
+                        <Download size={14} className="text-amber-400" />
+                        <span>Download & Decrypt</span>
+                      </button>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         </>
       )}
