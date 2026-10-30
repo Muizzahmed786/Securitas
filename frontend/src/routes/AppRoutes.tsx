@@ -21,7 +21,8 @@ import Audit from "../components/advisor/Audit";
 import Sharing from "../components/documents/Sharing";
 import Signatures from "../components/documents/Signatures";
 import Search from "../components/documents/Search";
-
+import Rooms from "../pages/Rooms";
+import RoomDetails from "../pages/RoomDetails";
 function DashboardForRole() {
   const { user, permissionsLoading } = useAuth();
 
@@ -78,31 +79,24 @@ export default function AppRoutes() {
 
           {/* Admin feature */}
           <Route
-            element={
-              <ProtectedRoute permissions={["crypto_keys.create"]} />
-            }
+            element={<ProtectedRoute permissions={["crypto_keys.create"]} />}
           >
-            <Route
-              path="admin/encryption"
-              element={<EncryptionSetup />}
-            />
+            <Route path="admin/encryption" element={<EncryptionSetup />} />
+          </Route>
+          <Route element={<ProtectedRoute permissions={["documents.read"]} />}>
+            <Route path="rooms" element={<Rooms />} />
+            <Route path="rooms/:roomId" element={<RoomDetails />} />
           </Route>
 
           {/* Owner feature */}
           <Route
-            element={
-              <ProtectedRoute permissions={["documents.upload"]} />
-            }
+            element={<ProtectedRoute permissions={["documents.upload"]} />}
           >
             <Route path="owner/upload" element={<Upload />} />
           </Route>
 
           {/* Auditor feature */}
-          <Route
-            element={
-              <ProtectedRoute permissions={["audit.read"]} />
-            }
-          >
+          <Route element={<ProtectedRoute permissions={["audit.read"]} />}>
             <Route path="advisor/audit" element={<Audit />} />
           </Route>
 
@@ -140,33 +134,25 @@ export default function AppRoutes() {
           </Route>
 
           {/* Keep legacy role URLs working */}
-          <Route
-            element={<ProtectedRoute allowedRoles={["ADMIN"]} />}
-          >
+          <Route element={<ProtectedRoute allowedRoles={["ADMIN"]} />}>
             <Route path="admin" element={<AdminDashboard />} />
           </Route>
 
           <Route
             element={
-              <ProtectedRoute
-                allowedRoles={["OWNER", "DOCUMENT_OWNER"]}
-              />
+              <ProtectedRoute allowedRoles={["OWNER", "DOCUMENT_OWNER"]} />
             }
           >
             <Route path="owner" element={<OwnerDashboard />} />
           </Route>
 
-          <Route
-            element={<ProtectedRoute allowedRoles={["EMPLOYEE"]} />}
-          >
+          <Route element={<ProtectedRoute allowedRoles={["EMPLOYEE"]} />}>
             <Route path="employee" element={<EmployeeDashboard />} />
           </Route>
 
           <Route
             element={
-              <ProtectedRoute
-                allowedRoles={["SECURITY_AUDITOR", "ADVISOR"]}
-              />
+              <ProtectedRoute allowedRoles={["SECURITY_AUDITOR", "ADVISOR"]} />
             }
           >
             <Route path="advisor" element={<AdvisorDashboard />} />

@@ -283,6 +283,27 @@ async def authorized_document(db, document_id: UUID, user: dict, required_permis
         now = datetime.now(timezone.utc)
         if past_grant["expires_at"] is not None and past_grant["expires_at"] <= now:
             raise ApiError(403, "Access to this document has expired")
+            # Room access is a fallback after the existing direct-share checks.
+    if required_permission in ("", "READ", "DOWNLOAD"):
+        room_access = await db.execute(
+            text("""
+                SELECT 1
+                FROM room_documents rd
+                JOIN room_members rm ON rm.room_id = rd.room_id
+                WHERE rd.document_id = :doc_id
+                  AND rd.shared_by = :owner_id
+                  AND rm.user_id = :user_id
+                LIMIT 1
+            """),
+            {
+                "doc_id": document_id,
+                "owner_id": doc["owner_id"],
+                "user_id": user_id,
+            },
+        )
+
+        if room_access.scalar() is not None:
+            return doc, "DOWNLOAD"
 
     raise ApiError(404, "Document not found or access denied")
 
