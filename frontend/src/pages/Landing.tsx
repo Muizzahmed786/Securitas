@@ -8,12 +8,17 @@ import {
   X,
   Shield,
 } from "lucide-react";
+import ComparisonGraphs, {
+  COMPARISON_DATA,
+} from "../components/landing/ComparisonGraphs";
 
 export default function Landing() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [timeFilter, setTimeFilter] = useState<"24H" | "7D" | "30D" | "ALL">("30D");
   const [interactiveRisk, setInteractiveRisk] = useState<"low" | "medium" | "high">("low");
+  const [comparisonView, setComparisonView] = useState<"both" | "graphs" | "table">("both");
+  const [selectedDimensionId, setSelectedDimensionId] = useState<string>("custody");
 
   const workflowSteps = [
     {
@@ -55,14 +60,11 @@ const sig = await crypto.subtle
       name: "Adaptive Risk & Step-Up Auth",
       tag: "BEHAVIORAL ENGINE",
       title: "Dynamic Contextual Defense",
-      desc: "Access attempts trigger a real-time risk scorer evaluating IP velocity, unusual hour baseline deviation, share volume, and document classification sensitivity (Restricted to Public).",
+      desc: "Access attempts trigger a real-time 6-factor risk scorer evaluating IP velocity/location, baseline time deviation, document classification sensitivity, download surge, access frequency, and share velocity.",
       guarantee: "Anomalous or high-risk access immediately triggers an automated 6-digit OTP challenge.",
-      code: `const score = evaluateRisk(
-  ipVelocity,
-  timeAnomaly,
-  classification
-);
-if (score > 70) requireStepUpOtp();`,
+      code: `const score = evaluateRisk(factors, policy);
+if (score > 80) blockAccess();
+else if (score > 60) requireStepUpOtp();`,
     },
     {
       step: "05",
@@ -79,50 +81,11 @@ const matches = searchIndex.query(token);`,
     },
   ];
 
-  const comparisonRows = [
-    {
-      feature: "Master Encryption Key Custody",
-      traditional: "Cloud provider owns and holds master keys in cloud memory. Vulnerable to insider leaks & subpoenas.",
-      securitas: "Zero-knowledge envelope keys. Client signing keys never touch servers; KEKs isolated per tenant schema.",
-      advantage: "Total Sovereign Custody",
-    },
-    {
-      feature: "Document Authenticity & Non-Repudiation",
-      traditional: "Passive checksums or basic timestamps. Administrators can silently alter files without detection.",
-      securitas: "Mathematical RSA-PSS digital signatures. Single-bit corruption or unauthorized edit instantly breaks signature.",
-      advantage: "Cryptographic Proof",
-    },
-    {
-      feature: "Real-Time Anomaly & Threat Defense",
-      traditional: "Static username/password and long-lived cookies. Stolen credentials grant full unrestricted access.",
-      securitas: "Adaptive Risk Engine evaluates IP velocity, time anomalies, and sensitivity, enforcing automated Step-Up OTP.",
-      advantage: "Zero-Trust Context",
-    },
-    {
-      feature: "Search on Encrypted Data",
-      traditional: "Provider decrypts document plaintext to index terms, creating a massive attack vector.",
-      securitas: "Blind HMAC-SHA256 tokenization searches over ciphertext without decrypting or exposing keywords.",
-      advantage: "Zero-Plaintext Index",
-    },
-    {
-      feature: "Audit Ledger Integrity",
-      traditional: "Opaque server logs easily deleted or modified by database superusers.",
-      securitas: "Append-only audit events with automated secret, passphrase, and key redaction with isolated auditor role.",
-      advantage: "Auditor-Isolated",
-    },
-    {
-      feature: "Granular Time-Bounded Sharing",
-      traditional: "Open link sharing with soft expiry flags that linger on file caches.",
-      securitas: "Cryptographically enforced share grants with strict permission masks (`read`, `verify`) and instant revocation.",
-      advantage: "Revocable by Design",
-    },
-  ];
-
   const featuresList = [
     {
       id: "01",
       title: "Client-Side RSA-PSS Signing",
-      desc: "Private keys are generated directly in the browser and stored locally as PEM files. WebCrypto generates 4096-bit RSA-PSS signatures with 32-byte salt lengths before file transport.",
+      desc: "Private keys are stored locally as PEM files and never touch servers. WebCrypto generates hardware-grade RSA-PSS signatures (2048–4096 bit, default 3072-bit) with 32-byte salt lengths before file transport.",
       specs: "RSA-PSS-SHA256 · 32-byte Salt · WebCrypto Native",
     },
     {
@@ -134,8 +97,8 @@ const matches = searchIndex.query(token);`,
     {
       id: "03",
       title: "Adaptive Behavioral Risk Engine",
-      desc: "A multi-factor risk engine scores access requests based on geographical IP velocity, baseline time deviations, sharing frequency, and document classification sensitivity (Restricted / Confidential / Internal).",
-      specs: "Dynamic 0–100 Risk Score · Auto Step-Up OTP · Replay-Resistant",
+      desc: "A multi-factor engine scores access requests across 6 behavioral factors: IP velocity, baseline time deviation, document classification sensitivity, download surge, access frequency, and share volume.",
+      specs: "6-Factor Risk Score (0–100) · Automated Step-Up OTP · Replay-Resistant",
     },
     {
       id: "04",
@@ -342,7 +305,7 @@ const matches = searchIndex.query(token);`,
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-neutral-500">Signatures</p>
-                  <p className="mt-1 text-sm font-medium text-neutral-200">RSA-PSS-4096</p>
+                  <p className="mt-1 text-sm font-medium text-neutral-200">RSA-PSS-3072</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-neutral-500">Key Custody</p>
@@ -434,7 +397,7 @@ const matches = searchIndex.query(token);`,
                         SOVEREIGN TENANT
                       </p>
                       <p className="mt-1 text-[8px] font-mono text-amber-400/90">
-                        RSA-PSS-4096 / AES-GCM
+                        RSA-PSS-3072 / AES-GCM
                       </p>
                     </div>
 
@@ -592,7 +555,7 @@ const matches = searchIndex.query(token);`,
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-xs text-neutral-400">50%</span>
-                    <span className="font-mono text-xs font-semibold text-white">AES-256 + KEK</span>
+                    <span className="font-mono text-xs font-semibold text-amber-400">Max Sensitivity (100)</span>
                   </div>
                 </div>
 
@@ -603,7 +566,7 @@ const matches = searchIndex.query(token);`,
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-xs text-neutral-400">30%</span>
-                    <span className="font-mono text-xs font-semibold text-white">Step-Up MFA</span>
+                    <span className="font-mono text-xs font-semibold text-amber-300">High Sensitivity (60)</span>
                   </div>
                 </div>
 
@@ -614,7 +577,7 @@ const matches = searchIndex.query(token);`,
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-xs text-neutral-400">14%</span>
-                    <span className="font-mono text-xs font-semibold text-white">RBAC Guarded</span>
+                    <span className="font-mono text-xs font-semibold text-neutral-300">Normal RBAC (30)</span>
                   </div>
                 </div>
 
@@ -625,7 +588,7 @@ const matches = searchIndex.query(token);`,
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-xs text-neutral-400">6%</span>
-                    <span className="font-mono text-xs font-semibold text-white">Signed Only</span>
+                    <span className="font-mono text-xs font-semibold text-neutral-400">Baseline (0)</span>
                   </div>
                 </div>
               </div>
@@ -670,7 +633,7 @@ const matches = searchIndex.query(token);`,
                   )}
                   {interactiveRisk === "high" && (
                     <span className="text-red-400">
-                      ✕ Risk Score: 82/100 · IP Velocity anomaly & Restricted classification. Access blocked pending 6-digit OTP step-up verification.
+                      ✕ Risk Score: 72/100 (HIGH) · IP Velocity anomaly & Restricted sensitivity. Decryption challenge issued: requires 6-digit OTP verification.
                     </span>
                   )}
                 </div>
@@ -795,59 +758,134 @@ const matches = searchIndex.query(token);`,
       {/* Comparison Section: Benefits over Traditional Applications (Matching Image 1) */}
       <section id="comparison" className="border-t border-white/[0.08] bg-[#08080a] py-24">
         <div className="mx-auto max-w-7xl px-6 lg:px-8">
-          <div className="max-w-3xl">
-            <span className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
-              Comparative Analysis
-            </span>
-            <h2 className="mt-3 text-3xl font-light tracking-tight text-white sm:text-4xl">
-              Why Securitas vs. Traditional Cloud Storage.
-            </h2>
-            <p className="mt-4 text-base text-neutral-400">
-              Legacy platforms (Google Drive, SharePoint, Box, Dropbox) rely on
-              server-managed keys and passive trust. Securitas enforces
-              client-side mathematics.
-            </p>
-          </div>
+          <div className="flex flex-wrap items-end justify-between gap-6">
+            <div className="max-w-3xl">
+              <span className="text-xs uppercase tracking-widest text-amber-500 font-semibold">
+                Comparative Analysis & Visual Plots
+              </span>
+              <h2 className="mt-3 text-3xl font-light tracking-tight text-white sm:text-4xl">
+                Why Securitas vs. Traditional Cloud Storage.
+              </h2>
+              <p className="mt-4 text-base text-neutral-400">
+                Legacy platforms (Google Drive, SharePoint, Box, Dropbox) rely on
+                server-managed keys and passive trust. Securitas enforces
+                client-side mathematics.
+              </p>
+            </div>
 
-          {/* Desktop Comparison Table */}
-          <div className="mt-16 overflow-hidden rounded-2xl border border-white/10 bg-[#101015]">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-white/10 bg-black/40 text-xs font-semibold tracking-wider text-neutral-400 uppercase">
-                    <th className="py-5 px-6">Architectural Dimension</th>
-                    <th className="py-5 px-6 text-neutral-400">Traditional Cloud Storage</th>
-                    <th className="py-5 px-6 text-white">Securitas Zero-Trust</th>
-                    <th className="py-5 px-6 text-amber-400">Advantage</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.06]">
-                  {comparisonRows.map((row, idx) => (
-                    <tr key={idx} className="transition hover:bg-white/[0.02]">
-                      <td className="py-5 px-6 font-medium text-white">
-                        {row.feature}
-                      </td>
-                      <td className="py-5 px-6 text-neutral-400 leading-relaxed">
-                        <div className="flex items-start gap-2">
-                          <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400/80" />
-                          <span>{row.traditional}</span>
-                        </div>
-                      </td>
-                      <td className="py-5 px-6 text-neutral-200 leading-relaxed bg-white/[0.01]">
-                        <div className="flex items-start gap-2">
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                          <span>{row.securitas}</span>
-                        </div>
-                      </td>
-                      <td className="py-5 px-6 font-mono text-xs text-amber-400 font-semibold">
-                        {row.advantage}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {/* View Mode Switcher */}
+            <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-[#121218] p-1 font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => setComparisonView("both")}
+                className={`rounded-lg px-3 py-1.5 transition ${
+                  comparisonView === "both"
+                    ? "bg-amber-500 text-black font-semibold shadow-sm"
+                    : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                Plots & Table
+              </button>
+              <button
+                type="button"
+                onClick={() => setComparisonView("graphs")}
+                className={`rounded-lg px-3 py-1.5 transition ${
+                  comparisonView === "graphs"
+                    ? "bg-amber-500 text-black font-semibold shadow-sm"
+                    : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                D3.js Plots
+              </button>
+              <button
+                type="button"
+                onClick={() => setComparisonView("table")}
+                className={`rounded-lg px-3 py-1.5 transition ${
+                  comparisonView === "table"
+                    ? "bg-amber-500 text-black font-semibold shadow-sm"
+                    : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                Specification Matrix
+              </button>
             </div>
           </div>
+
+          {/* D3 Plots Section */}
+          {(comparisonView === "both" || comparisonView === "graphs") && (
+            <div className="mt-12">
+              <ComparisonGraphs
+                selectedDimensionId={selectedDimensionId}
+                onSelectDimension={setSelectedDimensionId}
+              />
+            </div>
+          )}
+
+          {/* Desktop Comparison Table */}
+          {(comparisonView === "both" || comparisonView === "table") && (
+            <div className="mt-12 overflow-hidden rounded-2xl border border-white/10 bg-[#101015] shadow-2xl">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 bg-black/40 text-xs font-semibold tracking-wider text-neutral-400 uppercase">
+                      <th className="py-5 px-6">Architectural Dimension</th>
+                      <th className="py-5 px-6 text-neutral-400">Traditional Cloud Storage</th>
+                      <th className="py-5 px-6 text-white">Securitas Zero-Trust</th>
+                      <th className="py-5 px-6 text-amber-400">Advantage</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06]">
+                    {COMPARISON_DATA.map((row) => {
+                      const isSelected = row.id === selectedDimensionId;
+                      return (
+                        <tr
+                          key={row.id}
+                          onClick={() => setSelectedDimensionId(row.id)}
+                          className={`cursor-pointer transition ${
+                            isSelected
+                              ? "bg-amber-500/[0.07] border-l-2 border-l-amber-500"
+                              : "hover:bg-white/[0.02]"
+                          }`}
+                        >
+                          <td className="py-5 px-6 font-medium text-white">
+                            <div className="flex items-center gap-2">
+                              {isSelected && (
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_#f59e0b]" />
+                              )}
+                              <span>{row.feature}</span>
+                            </div>
+                          </td>
+                          <td className="py-5 px-6 text-neutral-400 leading-relaxed">
+                            <div className="flex items-start gap-2">
+                              <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400/80" />
+                              <span>{row.traditional}</span>
+                            </div>
+                          </td>
+                          <td className="py-5 px-6 text-neutral-200 leading-relaxed bg-white/[0.01]">
+                            <div className="flex items-start gap-2">
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                              <span>{row.securitas}</span>
+                            </div>
+                          </td>
+                          <td className="py-5 px-6 font-mono text-xs font-semibold whitespace-nowrap">
+                            <span
+                              className={`rounded-full border px-2.5 py-1 ${
+                                row.securitasScore >= row.traditionalScore
+                                  ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                                  : "border-red-500/30 bg-red-500/10 text-red-400"
+                              }`}
+                            >
+                              {row.advantage}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -887,7 +925,7 @@ const matches = searchIndex.query(token);`,
                 immediately.
               </p>
               <div className="mt-6 font-mono text-[11px] text-amber-400">
-                RSA-PSS-4096 / SHA-256
+                RSA-PSS-3072 / SHA-256
               </div>
             </div>
 
@@ -931,9 +969,9 @@ const matches = searchIndex.query(token);`,
               </p>
             </div>
             <div>
-              <p className="text-3xl font-light text-amber-400 sm:text-5xl font-mono">4096-bit</p>
+              <p className="text-3xl font-light text-amber-400 sm:text-5xl font-mono">3072-bit</p>
               <p className="mt-2 text-xs uppercase tracking-wider text-neutral-400">
-                RSA-PSS Signature Security
+                RSA-PSS Signature Standard
               </p>
             </div>
           </div>
@@ -1028,7 +1066,7 @@ const matches = searchIndex.query(token);`,
           </div>
 
           <div className="mt-12 flex flex-col justify-between items-center gap-4 border-t border-white/[0.06] pt-8 sm:flex-row">
-            <p>© 2026 Securitas Platform. Built with AES-256-GCM, RSA-PSS-4096, and Argon2id.</p>
+            <p>© 2026 Securitas Platform. Built with AES-256-GCM, RSA-PSS / RSA-OAEP, and bcrypt.</p>
             <div className="flex gap-6">
               <span className="hover:text-white transition">Privacy Notice</span>
               <span className="hover:text-white transition">Cryptographic Terms</span>
