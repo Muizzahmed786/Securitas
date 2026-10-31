@@ -1,8 +1,4 @@
-import {
-  useEffect,
-  useState,
-  type FormEvent,
-} from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -96,19 +92,14 @@ export default function RoomDetails() {
     setNotice("");
     setLoading(true);
 
-    Promise.all([
-      rooms.get(roomId),
-      rooms.documents(),
-    ])
+    Promise.all([rooms.get(roomId), rooms.documents()])
       .then(([details, documents]) => {
         if (!active) return;
 
         setRoom(details);
 
         setOwned(
-          documents.filter(
-            (doc) => String(doc.owner_id) === String(user?.id),
-          ),
+          documents.filter((doc) => String(doc.owner_id) === String(user?.id)),
         );
       })
       .catch((err) => {
@@ -122,6 +113,36 @@ export default function RoomDetails() {
       active = false;
     };
   }, [roomId, user?.id]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    async function refreshRoom() {
+      try {
+        const updatedRoom = await rooms.get(roomId);
+
+        if (!stopped) {
+          setRoom(updatedRoom);
+        }
+      } catch {
+        // Keep the current list if a background refresh fails.
+        // The existing Refresh button can still show request errors.
+      } finally {
+        if (!stopped) {
+          timer = setTimeout(refreshRoom, 5000);
+        }
+      }
+    }
+
+    // First background refresh happens after 5 seconds.
+    timer = setTimeout(refreshRoom, 5000);
+
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [roomId]);
 
   async function share(event: FormEvent) {
     event.preventDefault();
@@ -145,10 +166,7 @@ export default function RoomDetails() {
     }
   }
 
-  async function download(
-    doc: RoomDocument,
-    token?: string,
-  ) {
+  async function download(doc: RoomDocument, token?: string) {
     setBusy(true);
     setError("");
     setNotice("");
@@ -187,10 +205,7 @@ export default function RoomDetails() {
     setError("");
 
     try {
-      const result = await risk.verifyStepUp(
-        pending.challengeId,
-        otp.trim(),
-      );
+      const result = await risk.verifyStepUp(pending.challengeId, otp.trim());
 
       if (!result.step_up_token) {
         throw new Error("Verification did not return a token.");
@@ -216,10 +231,7 @@ export default function RoomDetails() {
   }
 
   const available = owned.filter(
-    (doc) =>
-      !room?.documents.some(
-        (shared) => shared.id === doc.id,
-      ),
+    (doc) => !room?.documents.some((shared) => shared.id === doc.id),
   );
 
   return (
@@ -290,7 +302,8 @@ export default function RoomDetails() {
                   {room.name}
                 </h1>
                 <p className="text-xs text-neutral-400">
-                  Share this Enclave ID with teammates to grant collaborative access.
+                  Share this Enclave ID with teammates to grant collaborative
+                  access.
                 </p>
               </div>
 
@@ -321,9 +334,13 @@ export default function RoomDetails() {
 
             {/* Security Guarantee callout matching Landing page */}
             <div className="mt-6 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs">
-              <span className="font-semibold text-amber-400">Security Guarantee: </span>
+              <span className="font-semibold text-amber-400">
+                Security Guarantee:{" "}
+              </span>
               <span className="text-neutral-300">
-                Documents shared within this enclave are protected by envelope encryption (AES-256-GCM / RSA-OAEP). Decryption operations require verified authorization and are audited.
+                Documents shared within this enclave are protected by envelope
+                encryption (AES-256-GCM / RSA-OAEP). Decryption operations
+                require verified authorization and are audited.
               </span>
             </div>
           </header>
@@ -343,7 +360,8 @@ export default function RoomDetails() {
                     Share Document in Room
                   </h2>
                   <p className="text-xs text-neutral-400">
-                    Authorize room members to decrypt and download one of your documents.
+                    Authorize room members to decrypt and download one of your
+                    documents.
                   </p>
                 </div>
               </div>
@@ -425,7 +443,8 @@ export default function RoomDetails() {
                     Additional Verification Required
                   </h2>
                   <p className="text-xs text-neutral-300">
-                    Adaptive risk evaluation flagged this access attempt. Enter your 6-digit one-time code to proceed with decryption.
+                    Adaptive risk evaluation flagged this access attempt. Enter
+                    your 6-digit one-time code to proceed with decryption.
                   </p>
                 </div>
               </div>
@@ -495,7 +514,8 @@ export default function RoomDetails() {
                     Shared Documents
                   </h2>
                   <p className="text-xs text-neutral-400">
-                    Cryptographically protected files available to verified room members.
+                    Cryptographically protected files available to verified room
+                    members.
                   </p>
                 </div>
               </div>
@@ -523,10 +543,7 @@ export default function RoomDetails() {
                     }
                   }}
                 >
-                  <RefreshCw
-                    size={13}
-                    className={busy ? "animate-spin" : ""}
-                  />
+                  <RefreshCw size={13} className={busy ? "animate-spin" : ""} />
                   <span>Refresh</span>
                 </button>
               </div>
@@ -541,7 +558,8 @@ export default function RoomDetails() {
                   No documents shared yet
                 </h3>
                 <p className="mx-auto mt-1 max-w-sm text-xs text-neutral-400">
-                  Share an encrypted document from your vault above to allow other members in this room to download it.
+                  Share an encrypted document from your vault above to allow
+                  other members in this room to download it.
                 </p>
               </div>
             ) : (
