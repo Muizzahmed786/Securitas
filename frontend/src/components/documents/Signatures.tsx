@@ -45,7 +45,7 @@ export default function Signatures() {
       .then((docs) => {
         if (active) setDocList(docs);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     if (canSign) {
       signatures
@@ -54,7 +54,7 @@ export default function Signatures() {
           if (active) setKeys(items);
         })
         .catch((err) => {
-          if (active) setError(errorMessage(err));
+
         });
     }
 
@@ -169,7 +169,7 @@ export default function Signatures() {
       </div>
 
       {/* Notifications */}
-      {error && (
+      {/* {error && (
         <div
           role="alert"
           className="flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-300"
@@ -177,7 +177,7 @@ export default function Signatures() {
           <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
           <span>{error}</span>
         </div>
-      )}
+      )} */}
 
       {message && (
         <div
@@ -235,11 +235,10 @@ export default function Signatures() {
                           {k.id.slice(0, 16)}...
                         </span>
                         <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            k.usable_for_signing
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${k.usable_for_signing
                               ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
                               : "border border-neutral-700 bg-neutral-800 text-neutral-400"
-                          }`}
+                            }`}
                         >
                           {k.usable_for_signing ? "Active" : "Archived"}
                         </span>
@@ -501,11 +500,10 @@ export default function Signatures() {
               <div className="flex items-center justify-between border-b border-white/5 pb-3">
                 <span className="text-xs font-medium text-neutral-300">Document Integrity</span>
                 <span
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                    result.document_integrity_valid
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${result.document_integrity_valid
                       ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
                       : "border border-red-500/20 bg-red-500/10 text-red-400"
-                  }`}
+                    }`}
                 >
                   {result.document_integrity_valid ? (
                     <>
@@ -541,11 +539,10 @@ export default function Signatures() {
                         <div className="flex items-center justify-between">
                           <span className="text-neutral-400 text-[11px]">Signature Status</span>
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                              sig.cryptographically_valid
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${sig.cryptographically_valid
                                 ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
                                 : "border border-red-500/20 bg-red-500/10 text-red-400"
-                            }`}
+                              }`}
                           >
                             {sig.cryptographically_valid ? "Valid" : "Invalid"}
                           </span>

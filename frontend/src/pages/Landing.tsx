@@ -454,7 +454,7 @@ const matches = searchIndex.query(token);`,
                     Total Cryptographically Verified Operations
                   </p>
                   <p className="mt-2 text-3xl font-light tracking-tight text-white sm:text-4xl">
-                    1,284,650
+                    
                   </p>
                   <p className="mt-1 text-xs font-medium text-emerald-400">
                     +100% integrity valid across all audited documents
@@ -506,13 +506,7 @@ const matches = searchIndex.query(token);`,
                   />
                 </svg>
                 {/* Year labels at bottom */}
-                <div className="mt-2 flex justify-between text-[11px] font-mono text-neutral-500">
-                  <span>Q1</span>
-                  <span>Q2</span>
-                  <span>Q3</span>
-                  <span>Q4</span>
-                  <span>CURRENT</span>
-                </div>
+
               </div>
 
               {/* Three Stat Pointers */}
